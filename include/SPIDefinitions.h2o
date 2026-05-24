@@ -1,0 +1,111 @@
+// SPIDefinitions.h - Versión simplificada
+#ifndef SPI_DEFINITIONS_H
+#define SPI_DEFINITIONS_H
+
+#include <stdint.h>
+#include <Arduino.h>
+
+// --- CONSTANTES ---
+#define SPI_MAGIC_MASTER 0xA5
+#define SPI_MAGIC_SLAVE  0x5A
+
+/*Android definitions 
+    CMD_STOP(0x00),     // Parada de emergencia
+    CMD_DRIVE(0x01),              // Movimiento con velocidad+ángulo
+    CMD_HEARTBEAT(0x02),
+    CMD_READ_SENSORS(0x03),      // Leer sensores
+    CMD_GET_SYSTEM(0x04),
+    CMD_SET_MODE(0x05),          // Cambiar modo de operación: MANUAL AUTOMATIC
+    CMD_GET_STATUS(0x06),
+    CMD_IDLE(0x07),
+    CMD_READY(0x08),
+    RESET_EMERGENCY(0x09),
+    RECONNECT(0x0A),
+    CMD_CALIBRATE(0x0B);         // Modo calibración
+*/
+
+
+typedef enum : uint8_t {
+    CMD_STOP = 0x00,
+    CMD_DRIVE = 0x01,
+    CMD_HEARTBEAT = 0x02,
+    CMD_READ_SENSORS = 0x03,
+    CMD_GET_SYSTEM = 0x04,
+    CMD_SET_MODE = 0x05,
+    CMD_GET_STATUS = 0x06,
+    CMD_IDLE = 0x07,
+    CMD_READY = 0x08,
+    CMD_RESET_EMERGENCY = 0x09,
+    CMD_RECONNECT = 0x0A,
+    CMD_CALIBRATE = 0x0B,
+    CMD_SET_EMERGENCY = 0x0C
+} ControlCommandType_t;
+
+typedef enum : uint8_t {
+    JOYSTIC = 0,
+    ROTATION = 1,
+    MANUAL = 2,
+    AUTOMATIC = 3,
+    CALIBRATION = 4
+} ControlMode;
+
+
+typedef enum : uint8_t {
+    TYPE_SENSORS = 0,
+    TYPE_SYSTEM = 1,
+} ResponseType;
+
+// --- PAYLOADS (Los datos puros sin envoltura) ---
+// Payload Master -> Slave (8 bytes exactos, optimizado para YOLO)
+typedef struct __attribute__((packed)) {
+    uint8_t type;          // ControlCommandType (Offset 0)
+    int16_t speed;         // Velocidad lineal (Offset 1)
+    int16_t angle;         // Ángulo de dirección (Offset 3)
+    uint8_t xCentroid;     // Centroide X mapeado a 0-255 (Offset 5)
+    uint8_t yCentroid;     // Centroide Y mapeado a 0-255 (Offset 6)
+    uint8_t state;         // Estado de la FSM (Offset 7)
+} ControlCommand_t;
+
+/* Payload Master -> Slave (8 bytes)
+typedef struct __attribute__((packed)) {
+    uint8_t type;          // ControlCommandType
+    int16_t speed;         
+    int16_t angle;               
+    uint16_t timestamp;
+    uint8_t state;        // Padding para llegar a 10 bytes
+} ControlCommand_t;
+*/
+
+
+
+
+// --- ESTRUCTURAS DE APLICACIÓN (Internas del Master/Slave) ---
+
+typedef struct {
+    float calibrationK;                         // ganancia estática
+    float calibrationTau;                       // constante de tiempo
+    bool calibrationValid;
+    uint8_t calibrationProgress; // 0-100% (si el Slave está en calibración)
+    bool batteryLow; // (opcional, si el Slave envía este dato o lo inferimos de alguna forma)
+} CalibrationData_t;
+/*
+typedef struct {
+    uint16_t distance;
+    uint16_t a_vel; // Velocidad de acercamiento (mm/s)
+    bool emergency;
+    bool sensor_ok;
+    uint32_t timestamp;
+    uint8_t error_count;
+} SonarSensorData_t;
+*/
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+uint16_t calcularChecksum(const void* data, size_t len);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif

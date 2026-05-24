@@ -1,0 +1,801 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Robot Control - YOLO + Manual</title>
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            background: #0a0a0a;
+            color: #e0e0e0;
+            min-height: 100dvh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 10px;
+            gap: 8px;
+        }
+        h1 { font-size: 1.2rem; color: #00adb5; margin: 2px 0; }
+        
+        /* Selector de modo */
+        .mode-selector {
+            display: flex;
+            gap: 4px;
+            background: #1a1a1a;
+            border-radius: 10px;
+            padding: 4px;
+        }
+        .mode-btn {
+            padding: 10px 16px;
+            border: none;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 13px;
+            cursor: pointer;
+            background: transparent;
+            color: #888;
+            transition: all 0.2s;
+        }
+        .mode-btn.active {
+            background: #00adb5;
+            color: #fff;
+        }
+        
+        .mode-container { display: none; width: 100%; max-width: 640px; }
+        .mode-container.active { display: block; }
+        
+        /* Botones */
+        .btn-row {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        button {
+            padding: 10px 18px;
+            font-size: 14px;
+            font-weight: 600;
+            background: #00adb5;
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            touch-action: manipulation;
+        }
+        button:active { background: #007a80; transform: scale(0.97); }
+        button.danger { background: #e63946; }
+        button.danger:active { background: #b71c1c; }
+        
+        /* Controles manuales */
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+            max-width: 300px;
+            margin: 8px auto;
+        }
+        .ctrl-btn {
+            padding: 20px 8px;
+            font-size: 20px;
+            font-weight: bold;
+            border-radius: 12px;
+            border: none;
+            background: #00adb5;
+            color: white;
+            cursor: pointer;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        .ctrl-btn:active { background: #007a80; transform: scale(0.95); }
+        .ctrl-btn.stop-btn { background: #e63946; grid-column: span 3; }
+        .spacer { visibility: hidden; }
+        
+        /* Video */
+        .video-container {
+            position: relative;
+            width: 100%;
+            max-width: 640px;
+            aspect-ratio: 4/3;
+            background: #1a1a1a;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        #mjpegStream, #canvas {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+        #fps {
+            position: absolute;
+            top: 8px; left: 12px;
+            background: rgba(0,0,0,0.75);
+            color: #0f0;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-family: monospace;
+            z-index: 5;
+        }
+        
+        /* HUD */
+        #hud {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            justify-content: center;
+            font-family: monospace;
+            font-size: 12px;
+            padding: 6px;
+            background: #1a1a1a;
+            border-radius: 8px;
+            max-width: 640px;
+            width: 100%;
+        }
+        #hud span { color: #4caf50; }
+        
+        .status {
+            font-family: monospace;
+            font-size: 12px;
+            color: #4caf50;
+            padding: 4px 12px;
+            background: #1a1a1a;
+            border-radius: 6px;
+            max-width: 640px;
+            width: 100%;
+            text-align: center;
+        }
+        .target-label {
+            font-size: 11px;
+            color: #888;
+            margin-top: 4px;
+        }
+        .target-label span { color: #00ff00; }
+    </style>
+</head>
+<body>
+
+    <h1>🤖 Robot Control Center</h1>
+    
+    <!-- Selector de modo -->
+    <div class="mode-selector">
+        <button class="mode-btn active" data-mode="manual">🎮 Manual</button>
+        <button class="mode-btn" data-mode="yolo">🧠 YOLO Autónomo</button>
+    </div>
+    
+    <!-- Botones comunes -->
+    <div class="btn-row">
+        <button id="btnConnect">🔗 Conectar WS</button>
+        <button id="btnStop" class="danger">🛑 STOP</button>
+    </div>
+    
+    <div class="status" id="lblStatus">Estado: Conectando...</div>
+    
+    <div id="hud">
+        <span>🔋 --%</span>
+        <span>📏 F:-- L:-- R:-- cm</span>
+        <span>⚡ --</span>
+        <span id="wsStatus">🔴 WS</span>
+    </div>
+    
+    <!-- MODO MANUAL -->
+    <div id="modeManual" class="mode-container active">
+        <div class="grid">
+            <div class="spacer"></div>
+            <button class="ctrl-btn" data-angle="90" data-speed="150">↑</button>
+            <div class="spacer"></div>            
+            <button class="ctrl-btn" data-angle="135" data-speed="120">←</button>
+            <div class="spacer"></div>
+            <button class="ctrl-btn" data-angle="45" data-speed="120">→</button>
+            <button class="ctrl-btn stop-btn" data-angle="90" data-speed="0">PARAR</button>
+            
+            <div class="spacer"></div>
+            <button class="ctrl-btn" data-angle="270" data-speed="150" data-reverse="true">↓</button>
+            <div class="spacer"></div>
+        </div>
+    </div>
+    
+    <!-- MODO YOLO -->
+    <div id="modeYOLO" class="mode-container">
+        <div class="video-container">
+            <img id="mjpegStream" src="/stream" crossorigin="anonymous" />
+            <canvas id="canvas"></canvas>
+            <div id="fps">-- FPS</div>
+        </div>
+        <div class="target-label">
+            Siguiendo: <span id="targetClass">persona (0)</span>
+        </div>
+    </div>
+
+<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
+<script>
+// ==================== CONFIGURACIÓN ====================
+const WS_URL = `ws://${window.location.hostname}:81`;
+const INPUT_SIZE = 640;
+const CONF_THRESHOLD = 0.25;
+const IOU_THRESHOLD = 0.45;
+const CLASS_TARGET = 0;
+
+const CMD_STOP  = 0x00;
+const CMD_DRIVE = 0x01;
+const CMD_HEART = 0x02;
+
+// ==================== VARIABLES GLOBALES ====================
+let ws = null;
+let wsConnected = false;
+let session = null;
+let currentMode = 'manual';
+let isProcessing = false;
+let fpsCounter = 0;
+let lastFpsTime = performance.now();
+let animationFrameId = null;
+let manualInterval = null;
+let lastSentCommand = { angle: 90, speed: 0, xCent: 128, yCent: 128 };
+let lastSendTime = 0;
+const MIN_SEND_INTERVAL = 50; // 20Hz máximo
+
+const imgStream = document.getElementById('mjpegStream');
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const fpsDiv = document.getElementById('fps');
+const lblStatus = document.getElementById('lblStatus');
+const wsStatus = document.getElementById('wsStatus');
+
+// Canvas global reutilizable para YOLO (Evita Garbage Collection)
+const resizeCanvas = document.createElement('canvas');
+resizeCanvas.width = INPUT_SIZE;
+resizeCanvas.height = INPUT_SIZE;
+const resizeCtx = resizeCanvas.getContext('2d');
+
+// ==================== SELECTOR DE MODO ====================
+document.querySelectorAll('.mode-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        currentMode = btn.dataset.mode;
+        
+        document.getElementById('modeManual').classList.toggle('active', currentMode === 'manual');
+        document.getElementById('modeYOLO').classList.toggle('active', currentMode === 'yolo');
+        
+        if (currentMode === 'yolo' && !session) {
+            initYOLO();
+        }
+        if (currentMode === 'manual') {
+            stop();
+        }
+        lblStatus.innerText = `✅ Modo: ${currentMode === 'manual' ? 'Manual' : 'YOLO Autónomo'}`;
+    });
+});
+
+// ==================== WEBSOCKET ====================
+document.getElementById('btnConnect').addEventListener('click', () => {
+    if (ws && wsConnected) {
+        ws.close();
+        return;
+    }
+    connectWebSocket();
+});
+
+function connectWebSocket() {
+    lblStatus.innerText = '🔗 Conectando WebSocket...';
+    ws = new WebSocket(WS_URL);
+    ws.binaryType = 'arraybuffer';
+    
+    ws.onopen = () => {
+        wsConnected = true;
+        wsStatus.innerHTML = '🟢 WS';
+        lblStatus.innerText = '✅ Conectado - ' + (currentMode === 'manual' ? 'Modo Manual' : 'Modo YOLO');
+        // Iniciar heartbeat
+        //startHeartbeat();
+        // ==================== CONSTANTES ====================
+const CMD_STOP  = 0x00;
+const CMD_DRIVE = 0x01;  // Comando de movimiento (con centroides)
+const CMD_HEART = 0x02;  // Heartbeat (NO debe interferir con el control)
+
+/* Modificar el heartbeat para que NO afecte al control
+setInterval(() => {
+    if (wsConnected) {
+        // Enviar heartbeat SOLO si no hay movimiento activo
+        // O usar un comando separado que no afecte el seguimiento
+        if (currentMode !== 'yolo' || !isProcessing) {
+            sendPacket(CMD_HEART, 128, 128, 90, 0, false);
+        }
+    }
+}, 2000);*/
+    };
+    
+    ws.onclose = () => {
+        wsConnected = false;
+        wsStatus.innerHTML = '🔴 WS';
+        lblStatus.innerText = '❌ Desconectado. Reconectando...';
+        setTimeout(connectWebSocket, 1500);
+    };
+    
+    ws.onerror = () => {
+        wsConnected = false;
+        wsStatus.innerHTML = '🔴 WS';
+    };
+    
+    ws.onmessage = (event) => {
+        const data = new Uint8Array(event.data);
+        if (data[0] === 0xBB && data[1] === 0x66) {
+            updateHUD(data);
+        }
+    };
+}
+
+// Heartbeat inteligente - Mantiene la conexión viva sin interferir
+let lastCommandTime = 0;
+let heartbeatInterval = null;
+
+function startHeartbeat() {
+    if (heartbeatInterval) clearInterval(heartbeatInterval);
+    
+    heartbeatInterval = setInterval(() => {
+        if (!wsConnected) return;
+        
+        const now = Date.now();
+        
+        // Si han pasado más de 500ms desde el último comando YOLO
+        if (currentMode === 'yolo' && (now - lastCommandTime) > 500) {
+            // Enviar heartbeat para mantener el sistema activo
+            // Usar el último comando conocido o un comando neutro
+            if (lastValidCommand) {
+                // Reenviar el último comando válido
+                sendPacket(CMD_DRIVE, 
+                          lastValidCommand.xCent, 
+                          lastValidCommand.yCent, 
+                          lastValidCommand.angle, 
+                          lastValidCommand.speed, 
+                          false);
+                console.log("💓 Heartbeat: reenviando último comando");
+            } else {
+                // Comando neutro (centro, sin movimiento)
+                sendPacket(CMD_HEART, 128, 128, 90, 0, false);
+            }
+        } else if (currentMode === 'manual') {
+            // En modo manual, solo mantener conexión
+            sendPacket(CMD_HEART, 128, 128, 90, 0, false);
+        }
+    }, 1000); // Cada 1 segundo
+}
+
+// Guardar el último comando válido
+let lastValidCommand = null;
+
+
+function updateHUD(data) {
+    const bat = data[2] || 0;
+    const spd = data[3] || 0;
+    const distF = data[4] || 0;
+    const distL = data[5] || 0;
+    const distR = data[6] || 0;
+    
+    document.getElementById('hud').innerHTML = `
+        <span>🔋 ${bat}%</span>
+        <span>📏 F:${distF} L:${distL} R:${distR} cm</span>
+        <span>⚡ ${spd}</span>
+        ${wsConnected ? '<span>🟢 WS</span>' : '<span>🔴 WS</span>'}
+    `;
+}
+
+// ==================== PAQUETE BINARIO ====================
+function buildPacket(cmdId, xCent, yCent, angleDeg, speed, reverse = false) {
+    const buf = new ArrayBuffer(12);
+    const view = new DataView(buf);
+    let offset = 0;
+    view.setUint8(offset++, 0xAA);
+    view.setUint8(offset++, 0x55);
+    view.setUint8(offset++, cmdId);
+    view.setUint16(offset, xCent, true); offset += 2;
+    view.setUint16(offset, yCent, true); offset += 2;
+    view.setInt16(offset, Math.round(angleDeg * 10), true); offset += 2;
+    view.setUint8(offset++, Math.min(255, speed));
+    view.setUint8(offset++, reverse ? 0x01 : 0x00);
+    const payload = new Uint8Array(buf, 2, 9);
+    view.setUint8(offset, crc8(payload));
+    return new Uint8Array(buf);
+}
+
+function crc8(data) {
+    let crc = 0x00;
+    for (let i = 0; i < data.length; i++) {
+        let byte = data[i];
+        for (let bit = 0; bit < 8; bit++) {
+            let mix = (crc ^ byte) & 0x01;
+            crc >>= 1;
+            if (mix) crc ^= 0x8C;
+            byte >>= 1;
+        }
+    }
+    return crc;
+}
+
+function sendPacket(cmdId, xCent, yCent, angleDeg, speed, reverse) {
+    if (!ws || !wsConnected) return;
+    
+    // Para debug: mostrar qué se envía
+    if (cmdId === CMD_DRIVE && speed > 0) {
+        console.log(`📤 Enviando: cmd=${cmdId} centro=(${xCent},${yCent}) ang=${angleDeg} vel=${speed}`);
+    }
+    
+    const packet = buildPacket(cmdId, xCent, yCent, angleDeg, speed, reverse);
+    ws.send(packet.buffer);
+}
+
+function drive(angle, speed, reverse = false) {
+    sendPacket(CMD_DRIVE, 128, 128, angle, speed, reverse);
+}
+
+function stop() {
+    sendPacket(CMD_STOP, 128, 128, 90, 0, false);
+}
+
+// ==================== CONTROLES MANUALES ====================
+document.querySelectorAll('.ctrl-btn').forEach(btn => {
+    btn.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        if (currentMode !== 'manual') return;
+        const angle = parseInt(btn.dataset.angle);
+        const speed = parseInt(btn.dataset.speed);
+        const reverse = btn.dataset.reverse === 'true';
+        drive(angle, speed, reverse);
+        clearInterval(manualInterval);
+        manualInterval = setInterval(() => drive(angle, speed, reverse), 100);
+    });
+    
+    btn.addEventListener('pointerup', (e) => {
+        e.preventDefault();
+        clearInterval(manualInterval);
+        stop();
+    });
+    
+    btn.addEventListener('pointerleave', () => {
+        clearInterval(manualInterval);
+        stop();
+    });
+});
+
+document.getElementById('btnStop').addEventListener('click', stop);
+
+// ==================== YOLO ====================
+async function initYOLO() {
+    lblStatus.innerText = '⏳ Cargando yolo11n.onnx...';
+    try {
+        session = await ort.InferenceSession.create(
+        'https://pemazzara.github.io/robot-models/yolo11n.onnx',
+        { 
+            executionProviders: ['webgl','wasm'], 
+            graphOptimizationLevel: 'all' 
+        });
+        lblStatus.innerText = '📹 YOLO listo. Detectando...';
+        startYOLOLoop();
+    } catch (e) {
+        lblStatus.innerText = '❌ Error ONNX: ' + e.message;
+    }
+}
+
+function startYOLOLoop() {
+    lastFpsTime = performance.now();
+    fpsCounter = 0;
+    processFrame();
+}
+
+async function processFrame() {
+    if (currentMode !== 'yolo') {
+        animationFrameId = requestAnimationFrame(processFrame);
+        return;
+    }
+    
+    if (!isProcessing && imgStream.complete && imgStream.naturalWidth > 0) {
+        isProcessing = true;
+        
+        const fw = imgStream.naturalWidth || 320;
+        const fh = imgStream.naturalHeight || 240;
+        canvas.width = fw;
+        canvas.height = fh;
+
+        // --- SOLUCIÓN DE INVERSIÓN VERTICAL EN CANVAS ---
+        ctx.save();
+        ctx.translate(0, fh);
+        ctx.scale(1, -1); // Invierte verticalmente el renderizado para dejarlo al derecho
+        ctx.drawImage(imgStream, 0, 0, fw, fh);
+        ctx.restore();
+        
+        try {
+            // El canvas ya tiene la imagen al derecho; lo enviamos a procesar
+            const inputTensor = preprocessImage(canvas);
+            const outputMap = await session.run({ images: inputTensor });
+            const detections = processOutput(outputMap, fw, fh);                         
+            console.log(`🔍 Detecciones totales: ${detections.length}`);
+            // Mostrar clases detectadas
+            detections.forEach(d => {
+            console.log(`   Clase ${d.class}: ${(d.confidence*100).toFixed(1)}% (${d.w.toFixed(0)}x${d.h.toFixed(0)})`);
+            });
+            
+            // Dibujamos las cajas sobre el canvas que ya está derecho
+            drawDetections(detections);
+            
+            const target = selectTarget(detections);
+            if (target) {
+                sendDrivingCommand(target, fw, fh);
+            } else {
+                stop(); 
+            }
+        } catch (e) {
+            // Dejamos de ser silenciosos para poder diagnosticar en la consola (F12)
+            console.error("⚠️ Error en ejecución de YOLO:", e);
+            lblStatus.innerText = '⚠️ Error de inferencia: ' + e.message;
+        }
+        
+        fpsCounter++;
+        const now = performance.now();
+        if (now - lastFpsTime >= 1000) {
+            fpsDiv.innerText = `FPS: ${fpsCounter}`;
+            fpsCounter = 0;
+            lastFpsTime = now;
+        }
+        
+        isProcessing = false;
+    }
+    
+    animationFrameId = requestAnimationFrame(processFrame);
+}
+
+function preprocessImage(sourceCanvas) {
+    // 1. Redimensionar al tamaño exacto de entrada del modelo (640x640)
+    //    Usamos el canvas global reutilizable (evita Garbage Collection)
+    resizeCtx.drawImage(sourceCanvas, 0, 0, INPUT_SIZE, INPUT_SIZE);
+    
+    // 2. Extraer los píxeles RGBA del canvas redimensionado
+    const imageData = resizeCtx.getImageData(0, 0, INPUT_SIZE, INPUT_SIZE);
+    const data = imageData.data; // Array plano [R,G,B,A, R,G,B,A, ...]
+    
+    // 3. Crear el buffer para el tensor CHW float32 [1, 3, 640, 640]
+    const imageSize = INPUT_SIZE * INPUT_SIZE;
+    const float32Array = new Float32Array(3 * imageSize);
+    
+    // 4. Llenar las capas R, G, B en orden CHW, ignorando el canal Alfa
+    for (let i = 0; i < imageSize; i++) {
+        // data[i*4] = Rojo, data[i*4+1] = Verde, data[i*4+2] = Azul, data[i*4+3] = Alfa
+        float32Array[i]                    = data[i * 4] / 255.0;     // Rojo
+        float32Array[imageSize + i]        = data[i * 4 + 1] / 255.0; // Verde
+        float32Array[2 * imageSize + i]    = data[i * 4 + 2] / 255.0; // Azul
+    }
+    
+    // 5. Devolver el tensor ONNX con la forma [1, 3, 640, 640]
+    return new ort.Tensor('float32', float32Array, [1, 3, INPUT_SIZE, INPUT_SIZE]);
+}
+// ==================== PROCESAMIENTO DE SALIDA ====================
+// Solo se busca la clase objetivo (persona) y se ignoran las demás para reducir falsos positivos
+// Procesa la salida del modelo y devuelve un array de detecciones con coordenadas absolutas
+function processOutput(outputMap, ow, oh) {
+    let output = null;
+    for (const key of Object.keys(outputMap)) { output = outputMap[key]; break; }
+    if (!output) return [];
+    
+    const data = output.data;
+    const dims = output.dims;
+    const numClasses = dims[1] - 4;
+    const numAnchors = dims[2];
+    const detections = [];
+    
+    for (let c = 0; c < numAnchors; c++) {
+        // SOLO buscar la clase 0 (persona)
+        const classIdx = 0;
+        const conf = data[(4 + classIdx) * numAnchors + c];
+        
+        if (conf > CONF_THRESHOLD) {
+            let cx = data[0 * numAnchors + c];
+            let cy = data[1 * numAnchors + c];
+            let w  = data[2 * numAnchors + c];
+            let h  = data[3 * numAnchors + c];
+            
+            // Convertir coordenadas
+            if (cx > 1.0 || cy > 1.0 || w > 1.0 || h > 1.0) {
+                cx = (cx / INPUT_SIZE) * ow;
+                cy = (cy / INPUT_SIZE) * oh;
+                w  = (w  / INPUT_SIZE) * ow;
+                h  = (h  / INPUT_SIZE) * oh;
+            } else {
+                cx = cx * ow;
+                cy = cy * oh;
+                w  = w  * ow;
+                h  = h  * oh;
+            }
+            
+            const x1 = cx - w / 2;
+            const y1 = cy - h / 2;
+            
+            detections.push({
+                x1, y1, x2: cx + w/2, y2: cy + h/2,
+                cx, cy, w, h,
+                confidence: conf,
+                class: classIdx
+            });
+        }
+    }
+    
+    return applyNMS(detections);
+}
+/*
+function processOutput(outputMap, ow, oh) {
+    let output = null;
+    for (const key of Object.keys(outputMap)) { output = outputMap[key]; break; }
+    if (!output) return [];
+    
+    const data = output.data;
+    const dims = output.dims;
+    const numClasses = dims[1] - 4;
+    const numAnchors = dims[2];
+    const detections = [];
+    
+    for (let c = 0; c < numAnchors; c++) {
+        let maxConf = 0, bestClass = -1;
+        for (let r = 0; r < numClasses; r++) {
+            const conf = data[(4 + r) * numAnchors + c];
+            if (conf > maxConf) { maxConf = conf; bestClass = r; }
+        }
+        
+        if (maxConf > CONF_THRESHOLD) {
+            let cx = data[0 * numAnchors + c];
+            let cy = data[1 * numAnchors + c];
+            let w  = data[2 * numAnchors + c];
+            let h  = data[3 * numAnchors + c];
+            
+            // ============ CORRECCIÓN DE COORDENADAS ============
+            // Si las coordenadas son > 1.0, están en píxeles absolutos (0-640)
+            // Si son <= 1.0, están normalizadas (0-1)
+            if (cx > 1.0 || cy > 1.0 || w > 1.0 || h > 1.0) {
+                // Coordenadas absolutas: convertir a píxeles de la imagen original
+                cx = (cx / INPUT_SIZE) * ow;
+                cy = (cy / INPUT_SIZE) * oh;
+                w  = (w  / INPUT_SIZE) * ow;
+                h  = (h  / INPUT_SIZE) * oh;
+            } else {
+                // Coordenadas normalizadas: convertir a píxeles de la imagen original
+                cx = cx * ow;
+                cy = cy * oh;
+                w  = w  * ow;
+                h  = h  * oh;
+            }
+            
+            const x1 = cx - w / 2;
+            const y1 = cy - h / 2;
+            const x2 = cx + w / 2;
+            const y2 = cy + h / 2;
+            
+            detections.push({
+                x1, y1, x2, y2,
+                cx, cy,
+                w, h,
+                confidence: maxConf,
+                class: bestClass
+            });
+        }
+    }
+    
+    return applyNMS(detections);
+}
+*/
+function applyNMS(dets) {
+    dets.sort((a, b) => b.confidence - a.confidence);
+    const keep = [];
+    
+    for (let i = 0; i < dets.length; i++) {
+        let suppress = false;
+        for (let j = 0; j < keep.length; j++) {
+            if (dets[i].class !== keep[j].class) continue;
+            const xA = Math.max(dets[i].x1, keep[j].x1);
+            const yA = Math.max(dets[i].y1, keep[j].y1);
+            const xB = Math.min(dets[i].x2, keep[j].x2);
+            const yB = Math.min(dets[i].y2, keep[j].y2);
+            const inter = Math.max(0, xB - xA) * Math.max(0, yB - yA);
+            const iou = inter / (dets[i].w * dets[i].h + keep[j].w * keep[j].h - inter);
+            if (iou > IOU_THRESHOLD) { suppress = true; break; }
+        }
+        if (!suppress) keep.push(dets[i]);
+    }
+    return keep;
+}
+
+function selectTarget(dets) {
+    const targets = dets.filter(d => d.class === CLASS_TARGET);
+    if (!targets.length) return null;
+    targets.sort((a, b) => (b.w * b.h) - (a.w * a.h));
+    console.log(`🎯 Buscando clase objetivo: ${CLASS_TARGET}`);
+    console.log(`   Candidatos: ${targets.length}`);
+    if (!targets.length) return null;
+    targets.sort((a, b) => (b.w * b.h) - (a.w * a.h));
+    console.log(`   Mejor: clase=${targets[0].class} conf=${(targets[0].confidence*100).toFixed(1)}%`);
+    return targets[0];
+}
+
+function drawDetections(dets) {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    // Volvemos a pintar la imagen al derecho antes de poner los cuadros encima
+    ctx.save();
+    ctx.translate(0, canvas.height);
+    ctx.scale(1, -1);
+    ctx.drawImage(imgStream, 0, 0, canvas.width, canvas.height);
+    ctx.restore();
+    
+    for (const d of dets) {
+        const isTarget = d.class === CLASS_TARGET;
+        ctx.strokeStyle = isTarget ? '#00ff00' : '#4488ff';
+        ctx.lineWidth = isTarget ? 3 : 2;
+        ctx.strokeRect(d.x1, d.y1, d.w, d.h);
+        
+        if (isTarget) {
+            ctx.strokeStyle = '#ff0000';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(d.cx - 15, d.cy);
+            ctx.lineTo(d.cx + 15, d.cy);
+            ctx.moveTo(d.cx, d.cy - 15);
+            ctx.lineTo(d.cx, d.cy + 15);
+            ctx.stroke();
+            
+            ctx.fillStyle = '#00ff00';
+            ctx.font = 'bold 14px monospace';
+            ctx.fillText(`${(d.confidence*100).toFixed(0)}%`, d.x1, d.y1 - 6);
+        }
+    }
+}
+
+function sendDrivingCommand(target, fw, fh) {
+    const errorX = target.cx - fw / 2;
+    let angleDeg = 90 - (errorX / (fw / 2)) * 45;
+    angleDeg = Math.max(0, Math.min(180, angleDeg));
+
+    const areaRatio = (target.w * target.h) / (fw * fh);
+
+    const MIN_SPEED = 0;
+    const MAX_SPEED = 255;
+    const AREA_FRENO = 0.6;
+    const AREA_LENTO = 0.3;
+    const AREA_MEDIO = 0.1;
+
+    let speed;
+    if (areaRatio >= AREA_FRENO) {
+        speed = 0; // Freno total
+    } else if (areaRatio >= AREA_LENTO) {
+        // CORRECCIÓN: Frena progresivamente de 80 hacia 0 a medida que se acerca
+        speed = Math.round(((AREA_FRENO - areaRatio) / (AREA_FRENO - AREA_LENTO)) * 80);
+    } else if (areaRatio >= AREA_MEDIO) {
+        // CORRECCIÓN: Reduce progresivamente de 180 hacia 80
+        speed = Math.round(80 + ((AREA_LENTO - areaRatio) / (AREA_LENTO - AREA_MEDIO)) * 100);
+    } else {
+        // Lejos: Velocidad alta, acelerando a medida que se aleja (hasta 255)
+        speed = Math.round(180 + ((AREA_MEDIO - areaRatio) / AREA_MEDIO) * 75);
+        speed = Math.min(MAX_SPEED, speed);
+    }
+
+    speed = Math.max(MIN_SPEED, Math.min(MAX_SPEED, speed));
+    
+    const xCent = Math.round((target.cx / fw) * 255);
+    const yCent = Math.round((target.cy / fh) * 255);
+    
+    console.log(`🚗 Comando: area=${areaRatio.toFixed(3)} speed=${speed} angle=${angleDeg.toFixed(1)}°`);
+    
+    sendPacket(CMD_DRIVE, xCent, yCent, angleDeg, speed, false);
+}
+
+// ==================== INICIO ====================
+window.addEventListener('load', () => {
+    connectWebSocket();
+    lblStatus.innerText = '🔗 Conectando al robot...';
+});
+
+window.addEventListener('beforeunload', () => {
+    stop();
+    clearInterval(manualInterval);
+    if (animationFrameId) cancelAnimationFrame(animationFrameId);
+});
+</script>
+</body>
+</html>
