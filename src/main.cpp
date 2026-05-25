@@ -8,7 +8,6 @@
 #include "motor_control.h"
 #include "sonar_integration.h"
 #include "speed_controller.h"
-#include "config.h"
 #include "GradientAligner.h"
 #include "esp_task_wdt.h"
 #include <WiFi.h>
@@ -23,17 +22,13 @@
 
 // Handles globales de FreeRTOS
 // ==================== HANDLES DE TAREAS ====================
-TaskHandle_t xSafetyTaskHandle = NULL;
 TaskHandle_t xSensorRead_Handle = NULL;
 TaskHandle_t sonarTaskHandle = NULL;
-TaskHandle_t xSPITaskHandle = NULL;
-TaskHandle_t xNavigationTaskHandle = NULL;
 TaskHandle_t motorTaskHandle = NULL;
 TaskHandle_t httpTaskHandle = NULL;
 
-// ==================== VARIABLES DE CONTROL ====================
-// ==================== VARIABLES ATÓMICAS ======================
-// Variables compartidas (atómicas) para comunicación entre cores
+// ==================== VARIABLES ATÓMICAS DE CONTROL ====================
+// Para comunicación entre cores
 std::atomic<float> targetAngle{90.0f};
 std::atomic<int> targetSpeed{0};
 std::atomic<uint16_t> targetXCentroid{0};  // Nuevo
@@ -85,12 +80,10 @@ uint8_t crc8(const uint8_t *data, size_t len) {
 void setupFreeRTOS();
 void printResetReason();
 // ✅ DECLARAR TODAS LAS TASKS
-void safetyTask(void *pvParameters);
 void tofSensorTask(void *pvParameters);
 void sonarTask(void *pvParameters);
 void httpTask(void *pvParameters);
 void motorTask(void *pvParameters);
-void navigationTask(void *pvParameters);
 
 
 //void checkJTAGPins();
@@ -548,11 +541,7 @@ void setup() {
     
     // Mutex
     sensorMutex = xSemaphoreCreateMutex();
-    //xSpeedControllerMutex = xSemaphoreCreateMutex();
-    //if (xSpeedControllerMutex == NULL) {
-    //    Serial.println("❌ Error creando mutex. Reiniciando...");
-     //   ESP.restart();
-    //}
+ 
     
     // Wi-Fi
     WiFi.begin(ssid, password);

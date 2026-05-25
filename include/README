@@ -57,21 +57,3 @@ Estos valores son deseados para los motores, pero tu sistema de comunicación (e
 
 Por eso necesitas la función speedsToSpeedAngle: para convertir esas velocidades diferenciales deseadas en un par (speed, angle) que tu sistema pueda interpretar.
 
-🔁 El flujo completo
-ObstacleAvoidance decide, basado en sensores, qué deben hacer los motores:
-output.leftSpeed = 600, output.rightSpeed = 200 (por ejemplo, una curva suave a la derecha).
-
-navigationTask recibe ese output y necesita convertirlo a un comando que el slave entienda:
-
-speed = velocidad media (por ejemplo, (600+200)/2 = 400)
-
-angle = ángulo que, aplicado en setDrive, produzca aproximadamente esas velocidades.
-
-La función speedsToSpeedAngle realiza esa conversión. Luego se crea el ControlCommand_t con speed y angle y se envía por SPI al slave.
-
-El slave, en setDrive, vuelve a convertir ese (speed, angle) en velocidades izquierda/derecha usando las fórmulas trigonométricas que ya tienes, y aplica PWM a los motores.
-
-🧮 ¿Por qué no enviar directamente left/right?
-Tu sistema actual está diseñado para recibir un par (speed, angle) porque así es más fácil de interpretar desde la app (joystick, botones, inclinación) y porque el slave ya tiene la lógica para convertirlo a velocidades diferenciales. Si quisieras enviar velocidades independientes, tendrías que cambiar el protocolo BLE/SPI y la lógica del slave. No es imposible, pero implicaría más cambios.
-
-Por ahora, la solución es usar la función de conversión en el master.
