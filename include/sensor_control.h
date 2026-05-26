@@ -6,17 +6,17 @@
 
 #define NUM_SENSORES 3
 // Pines XSHUT
-#define FRONT_XSHUT_PIN  4 
-#define LEFT_XSHUT_PIN   5
-#define RIGHT_XSHUT_PIN  6 
+#define FRONT_XSHUT_PIN  38 
+#define LEFT_XSHUT_PIN   1
+#define RIGHT_XSHUT_PIN  40 
 
 #define SENSOR_FRONT 0
 #define SENSOR_LEFT  1 
 #define SENSOR_RIGHT 2
 
 // Pines I2C y sensores VL53L0X
-#define I2C_TOF_SDA 20
-#define I2C_TOF_SCL 21
+#define I2C_TOF_SDA 4
+#define I2C_TOF_SCL 5
 
 // Dirección por defecto (todos los sensores usan la misma)
 #define DEFAULT_ADDRESS  0x29

@@ -40,7 +40,7 @@ Navegador (HTML5 + ONNX Runtime Web) ──► YOLOv11n ──► Comandos (WebS
 
 | Componente | Descripción |
 |------------|-------------|
-| **Placa** | ESP32-S3-WROOM N16R8 (Goouuu) |
+| **Placa** | ESP32-S3 DevKit-N16R8 CAM |
 | **Cámara** | OV2640 integrada |
 | **Driver** | L298N (2 canales) |
 | **Sensores** | 3× VL53L0X ToF (frontal, izquierdo, derecho) |
@@ -58,10 +58,11 @@ Navegador (HTML5 + ONNX Runtime Web) ──► YOLOv11n ──► Comandos (WebS
 | L298N ENB | 2 |
 | L298N IN3 | 41 |
 | L298N IN4 | 42 |
-| VL53L0X (I2C) | SDA=17, SCL=16 |
+| VL53L0X (I2C) | SDA=4, SCL=5 |
 | HC-SR04 | TRIG=?, ECHO=? |
-
----
+![alt text](image.png)
+Ver:
+https://www.oceanlabz.in/getting-started-with-esp32-s3-wroom-n16r8-cam-dev-board/
 
 ## 📦 Software
 

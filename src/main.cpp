@@ -1,4 +1,5 @@
 // main.cpp - ESP32 con FreeRTOS
+// https://www.oceanlabz.in/getting-started-with-esp32-s3-wroom-n16r8-cam-dev-board/
 #include <Arduino.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
@@ -8,7 +9,6 @@
 #include "motor_control.h"
 #include "sonar_integration.h"
 #include "speed_controller.h"
-#include "GradientAligner.h"
 #include "esp_task_wdt.h"
 #include <WiFi.h>
 #include <WebServer.h>
@@ -81,7 +81,6 @@ void setupFreeRTOS();
 void printResetReason();
 // ✅ DECLARAR TODAS LAS TASKS
 void tofSensorTask(void *pvParameters);
-void sonarTask(void *pvParameters);
 void httpTask(void *pvParameters);
 void motorTask(void *pvParameters);
 
@@ -92,26 +91,22 @@ void speedsToSpeedAngle(int16_t left, int16_t right, int& speed, int& angle);
 
 // Instancias globales
 MotorControl motorController;
-UltraSonicMeasure sonar;
-SpeedController speedController;
-
 SensorControl sensors;
+SpeedController speedController;
 SensorData_t globalSensorData;
-
-//AngleOptimizer angleOptimizer;
 
 
 // ==================== WI-FI ====================
-const char *ssid = "Mi_ssid";
-const char *password = "Mi_contraseña";
+//const char *ssid = "Mi_ssid";
+//const char *password = "Mi_contraseña";
+const char *ssid = "Hervidero";
+const char *password = "lSdS,seemm,slh+gqshielhpdlti";
 
 // ==================== SERVIDORES ====================
 WebServer serverHTTP(80);
 WebSocketsServer webSocket(81); // Puerto 81 para WebSocket
 
 
-
-//bool hasNewCommand = false;
 
 void setupCamera() {
     camera_config_t config;
@@ -285,34 +280,7 @@ void onWebSocketEvent(uint8_t num, WStype_t type, uint8_t *payload, size_t lengt
             break;
     }
 }
-                    /* Guardar valores usando memory_order_release para consistencia
-                    targetXCentroid.store(pkt->xCentroid, std::memory_order_release);
-                    targetYCentroid.store(pkt->yCentroid, std::memory_order_release);
-                    targetAngle.store(pkt->angle / 10.0f, std::memory_order_release);
-                    targetSpeed.store(pkt->speed, std::memory_order_release);
-                    lastCommandTime.store(millis(), std::memory_order_release);
 
-                    Serial.printf("✅ [%u] Centro=(%d,%d) Ang=%.1f° Vel=%d Cmd=%d CRC=0x%02X\n",
-                                  num, pkt->xCentroid, pkt->yCentroid,
-                                  pkt->angle / 10.0f, pkt->speed, pkt->cmdId, calcCrc);
-                } else {
-                    Serial.printf("❌ CRC error: calc=0x%02X recv=0x%02X (payload[11])\n", 
-                                  calcCrc, payload[11]);
-                    // Debug: mostrar los primeros bytes para diagnóstico
-                    Serial.printf("   Raw: ");
-                    for(int i=0; i<12; i++) {
-                        Serial.printf("%02X ", payload[i]);
-                    }
-                    Serial.println();
-                }
-            } else {
-                Serial.printf("⚠️ Paquete inválido: %d bytes, headers: 0x%02X 0x%02X\n", 
-                              length, payload[0], payload[1]);
-            }
-            break;
-    }
-}
-*/
 
 // ==================== ENVIAR TELEMETRÍA POR WEBSOCKET ====================
 
@@ -325,9 +293,9 @@ void sendTelemetry() {
     telemetry[2] = 85;  // Batería (simulada)
     telemetry[3] = targetSpeed.load(std::memory_order_relaxed);
     // Añadir sensores reales aquí
-    telemetry[4] = 0;   // Distancia frontal
-    telemetry[5] = 0;   // Distancia izquierda
-    telemetry[6] = 0;   // Distancia derecha
+    telemetry[4] = globalSensorData.tofFront;   // Distancia frontal
+    telemetry[5] = globalSensorData.tofLeft;    // Distancia izquierda
+    telemetry[6] = globalSensorData.tofRight;   // Distancia derecha
 
     webSocket.broadcastBIN(telemetry, sizeof(telemetry));
 }
@@ -385,56 +353,7 @@ void motorTask(void *pvParameters) {
         }
     }
 }
-        
-/*
-        if (ahora - tUltimoCmd > 500) {
-            speedController.setTarget(90.0f, 0, 0, 0);
-            speedController.updateControl();
-        } else {
-            float angulo = targetAngle.load(std::memory_order_relaxed);
-            int velocidad = targetSpeed.load(std::memory_order_relaxed);
-            uint16_t xCent = targetXCentroid.load(std::memory_order_relaxed);
-            uint16_t yCent = targetYCentroid.load(std::memory_order_relaxed);
-            
-            float pwm_target = (velocidad / 255.0f) * 1023.0f;
-            
-            // Pasar centroides al controlador
-            speedController.setTarget(angulo, pwm_target, xCent, yCent);
-            speedController.updateControl();
-        }
-    }
-}*/
 
-/* ==================== TAREA MOTOR (Core 1, 50 Hz) ====================
-void motorTask(void *pvParameters) {
-    Serial.printf("⚙️ Motor Task en Core %d\n", xPortGetCoreID());
-    
-    TickType_t xLastWakeTime = xTaskGetTickCount();
-    const TickType_t xFrequency = pdMS_TO_TICKS(20); // 50 Hz
-    
-    for (;;) {
-        vTaskDelayUntil(&xLastWakeTime, xFrequency);
-        
-        uint32_t ahora = millis();
-        uint32_t tUltimoCmd = lastCommandTime.load(std::memory_order_acquire);
-        // FAILSAFE: Si no recibimos comandos de YOLO en más de 500ms, paramos por seguridad
-        if (ahora - tUltimoCmd > 500) {
-                speedController.setTarget(90.0f, 0);
-                speedController.updateControl();
-        } else {
-            float angulo = targetAngle.load(std::memory_order_relaxed);
-            int velocidad = targetSpeed.load(std::memory_order_relaxed);
-            // Convertir velocidad (0-255) a PWM (0-1023)
-            float pwm_target = (velocidad / 255.0f) * 1023.0f;
-            pwm_target = constrain(pwm_target, 0.0f, 1023.0f);
-            
-            speedController.setTarget(angulo, pwm_target);
-            speedController.updateControl();
-        
-        }
-    }
-}
-*/
 // ✅ SETUP FREERTOS SIMPLIFICADO
 void setupFreeRTOS() {
     Serial.println("🔧 Inicializando FreeRTOS..."); 
@@ -459,7 +378,7 @@ void setupFreeRTOS() {
         &motorTaskHandle,   // Handle
         1   // Core 1
     );
-    /* Tarea TOF SENSORS alta prioridad, mucho stack
+    // Tarea TOF SENSORS alta prioridad, mucho stack
     Serial.println("   Creando task tofSensorRead...");
     xTaskCreatePinnedToCore(
         tofSensorTask,     // Función
@@ -469,67 +388,13 @@ void setupFreeRTOS() {
         3, //configMAX_PRIORITIES - 2,
         &xSensorRead_Handle,
         0
-    );*/
-
-    /* Tasks comunes
-    xTaskCreatePinnedToCore(
-        sonarTask,
-        "Sonar",
-        8192,        // 8KB stack
-        &sonar,
-        1,  // Prioridad baja
-        &sonarTaskHandle,
-        1   // Core 1
-    ); 
-
-    xTaskCreatePinnedToCore(
-        safetyTask,
-        "Safety",
-        4096,
-        NULL,
-        5, //TASK_PRIORITY_SAFETY,
-        &xSafetyTaskHandle,
-        1
     );
-    
-    Serial.println("   Creando task Navigation...");
-    xTaskCreatePinnedToCore(
-        navigationTask,
-        "Navigation",
-        4096, 
-        NULL,
-        2, //TASK_PRIORITY_NAV,
-        &xNavigationTaskHandle,
-        1
-    );*/
 
     Serial.println("✅ FreeRTOS inicializado");
     Serial.println("   - Core 1: MotorControl (Prioridad Alta)");
     Serial.println("   - Core 0: HTTP Server (Prioridad Media)");   
 }
-/*
-void setup() {
-    Serial.begin(115200);
-    delay(1000);
-    
-    Serial.println("\n=== PRUEBA DE PSRAM ===");
-    Serial.printf("Flash size: %d MB\n", ESP.getFlashChipSize() / (1024 * 1024));
-    Serial.printf("PSRAM size: %d bytes", ESP.getPsramSize());
-    
-    if (ESP.getPsramSize() == 0) {
-        Serial.println(" (NO DETECTADA)");
-        Serial.println("❌ La PSRAM no está configurada correctamente");
-    } else {
-        Serial.printf(" (%d MB)\n", ESP.getPsramSize() / (1024 * 1024));
-        Serial.printf("PSRAM libre: %d bytes\n", ESP.getFreePsram());
-        
-        void* ptr = ps_malloc(1000000);
-        if (ptr) {
-            Serial.println("✅ Asignación de 1MB en PSRAM exitosa");
-            free(ptr);
-        }
-    }
-}*/
+
 
 void setup() {
     Serial.begin(115200);
@@ -563,9 +428,8 @@ void setup() {
     // Cámara
     setupCamera();
         
-    //sensors.begin();// Sensores ToF
+    sensors.begin();// Sensores ToF
     motorController.begin();
-    
     speedController.begin();
     
     // Servir el archivo index.html directamente desde SPIFFS
@@ -638,11 +502,6 @@ void httpTask(void *pvParameters) {
         vTaskDelay(pdMS_TO_TICKS(5));
     }
 }
-
-
-
-
-
 
 void speedsToSpeedAngle(int16_t left, int16_t right, int& speed, int& angle) {
     // 1. Si ambos son cero, es STOP
@@ -719,7 +578,7 @@ void tofSensorTask(void *pvParameters) {
             xSemaphoreGive(sensorMutex);
         }
          
-        //spiMaster.evaluarEmergenciaInmediata(globalSensorData);
+        //evaluarEmergenciaInmediata(globalSensorData);
         vTaskDelay(pdMS_TO_TICKS(20));
     }  // Tarea crítica: Lectura del sensor
 }

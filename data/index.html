@@ -2,227 +2,93 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Robot Control - YOLO + Manual</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Control Robot YOLO + Voz</title>
     <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
     <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body {
-            font-family: 'Segoe UI', system-ui, sans-serif;
-            background: #0a0a0a;
-            color: #e0e0e0;
-            min-height: 100dvh;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            padding: 10px;
-            gap: 8px;
+        .active { background-color: #3b82f6 !important; border-color: #2563eb !important; color: white !important; }
+        .mic-active { animation: pulse-red 1.5s infinite; }
+        @keyframes pulse-red {
+            0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+            70% { box-shadow: 0 0 0 15px rgba(239, 68, 68, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
         }
-        h1 { font-size: 1.2rem; color: #00adb5; margin: 2px 0; }
-        
-        /* Selector de modo */
-        .mode-selector {
-            display: flex;
-            gap: 4px;
-            background: #1a1a1a;
-            border-radius: 10px;
-            padding: 4px;
-        }
-        .mode-btn {
-            padding: 10px 16px;
-            border: none;
-            border-radius: 8px;
-            font-weight: 600;
-            font-size: 13px;
-            cursor: pointer;
-            background: transparent;
-            color: #888;
-            transition: all 0.2s;
-        }
-        .mode-btn.active {
-            background: #00adb5;
-            color: #fff;
-        }
-        
-        .mode-container { display: none; width: 100%; max-width: 640px; }
-        .mode-container.active { display: block; }
-        
-        /* Botones */
-        .btn-row {
-            display: flex;
-            gap: 8px;
-            flex-wrap: wrap;
-            justify-content: center;
-        }
-        button {
-            padding: 10px 18px;
-            font-size: 14px;
-            font-weight: 600;
-            background: #00adb5;
-            color: #fff;
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-            touch-action: manipulation;
-        }
-        button:active { background: #007a80; transform: scale(0.97); }
-        button.danger { background: #e63946; }
-        button.danger:active { background: #b71c1c; }
-        
-        /* Controles manuales */
-        .grid {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 8px;
-            max-width: 300px;
-            margin: 8px auto;
-        }
-        .ctrl-btn {
-            padding: 20px 8px;
-            font-size: 20px;
-            font-weight: bold;
-            border-radius: 12px;
-            border: none;
-            background: #00adb5;
-            color: white;
-            cursor: pointer;
-            user-select: none;
-            -webkit-user-select: none;
-        }
-        .ctrl-btn:active { background: #007a80; transform: scale(0.95); }
-        .ctrl-btn.stop-btn { background: #e63946; grid-column: span 3; }
-        .spacer { visibility: hidden; }
-        
-        /* Video */
-        .video-container {
-            position: relative;
-            width: 100%;
-            max-width: 640px;
-            aspect-ratio: 4/3;
-            background: #1a1a1a;
-            border-radius: 10px;
-            overflow: hidden;
-        }
-        #mjpegStream, #canvas {
-            position: absolute;
-            top: 0; left: 0;
-            width: 100%;
-            height: 100%;
-            object-fit: contain;
-        }
-        #fps {
-            position: absolute;
-            top: 8px; left: 12px;
-            background: rgba(0,0,0,0.75);
-            color: #0f0;
-            padding: 3px 8px;
-            border-radius: 4px;
-            font-size: 11px;
-            font-family: monospace;
-            z-index: 5;
-        }
-        
-        /* HUD */
-        #hud {
-            display: flex;
-            gap: 10px;
-            flex-wrap: wrap;
-            justify-content: center;
-            font-family: monospace;
-            font-size: 12px;
-            padding: 6px;
-            background: #1a1a1a;
-            border-radius: 8px;
-            max-width: 640px;
-            width: 100%;
-        }
-        #hud span { color: #4caf50; }
-        
-        .status {
-            font-family: monospace;
-            font-size: 12px;
-            color: #4caf50;
-            padding: 4px 12px;
-            background: #1a1a1a;
-            border-radius: 6px;
-            max-width: 640px;
-            width: 100%;
-            text-align: center;
-        }
-        .target-label {
-            font-size: 11px;
-            color: #888;
-            margin-top: 4px;
-        }
-        .target-label span { color: #00ff00; }
     </style>
 </head>
-<body>
+<body class="bg-slate-900 text-slate-100 min-h-screen flex flex-col items-center p-4 font-sans">
 
-    <h1>🤖 Robot Control Center</h1>
-    
-    <!-- Selector de modo -->
-    <div class="mode-selector">
-        <button class="mode-btn active" data-mode="manual">🎮 Manual</button>
-        <button class="mode-btn" data-mode="yolo">🧠 YOLO Autónomo</button>
-    </div>
-    
-    <!-- Botones comunes -->
-    <div class="btn-row">
-        <button id="btnConnect">🔗 Conectar WS</button>
-        <button id="btnStop" class="danger">🛑 STOP</button>
-    </div>
-    
-    <div class="status" id="lblStatus">Estado: Conectando...</div>
-    
-    <div id="hud">
-        <span>🔋 --%</span>
-        <span>📏 F:-- L:-- R:-- cm</span>
-        <span>⚡ --</span>
-        <span id="wsStatus">🔴 WS</span>
-    </div>
-    
-    <!-- MODO MANUAL -->
-    <div id="modeManual" class="mode-container active">
-        <div class="grid">
-            <div class="spacer"></div>
-            <button class="ctrl-btn" data-angle="90" data-speed="150">↑</button>
-            <div class="spacer"></div>            
-            <button class="ctrl-btn" data-angle="135" data-speed="120">←</button>
-            <div class="spacer"></div>
-            <button class="ctrl-btn" data-angle="45" data-speed="120">→</button>
-            <button class="ctrl-btn stop-btn" data-angle="90" data-speed="0">PARAR</button>
-            
-            <div class="spacer"></div>
-            <button class="ctrl-btn" data-angle="270" data-speed="150" data-reverse="true">↓</button>
-            <div class="spacer"></div>
-        </div>
-    </div>
-    
-    <!-- MODO YOLO -->
-    <div id="modeYOLO" class="mode-container">
-        <div class="video-container">
-            <img id="mjpegStream" src="/stream" crossorigin="anonymous" />
-            <canvas id="canvas"></canvas>
-            <div id="fps">-- FPS</div>
-        </div>
-        <div class="target-label">
-            Siguiendo: <span id="targetClass">persona (0)</span>
+    <!-- Encabezado y Estado -->
+    <div class="w-full max-w-2xl flex justify-between items-center bg-slate-800 p-4 rounded-xl shadow-lg mb-4">
+        <h1 class="text-xl font-bold text-blue-400">🤖 Robot Tracker V2</h1>
+        <div id="hud" class="flex gap-4 text-sm font-mono bg-slate-900 px-3 py-2 rounded-lg border border-slate-700">
+            <span>🔋 --%</span>
+            <span>📏 F:-- L:-- R:-- cm</span>
+            <span>⚡ 0</span>
+            <span id="wsStatus">🔴 WS</span>
         </div>
     </div>
 
-<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
+    <div class="w-full max-w-2xl flex justify-between items-center mb-4 gap-4">
+        <button id="btnConnect" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-lg font-bold transition-colors w-1/3">
+            Conectar WS
+        </button>
+        <div id="lblStatus" class="flex-1 bg-slate-800 p-2 rounded-lg text-center text-sm font-mono truncate">
+            Esperando conexión...
+        </div>
+    </div>
+
+    <!-- Modos de Control -->
+    <div class="w-full max-w-2xl flex gap-2 mb-4 bg-slate-800 p-2 rounded-xl">
+        <button data-mode="manual" class="mode-btn active flex-1 py-2 bg-slate-700 border border-slate-600 rounded-lg font-bold transition-colors">🎮 Manual</button>
+        <button data-mode="yolo" class="mode-btn flex-1 py-2 bg-slate-700 border border-slate-600 rounded-lg font-bold transition-colors">👁️ YOLO</button>
+        <button data-mode="voice" class="mode-btn flex-1 py-2 bg-slate-700 border border-slate-600 rounded-lg font-bold transition-colors">🎤 Voz</button>
+    </div>
+
+    <!-- CONTENEDOR MODO YOLO -->
+    <div id="panelYolo" class="hidden relative w-full max-w-2xl bg-black rounded-xl overflow-hidden shadow-2xl border-2 border-slate-700 aspect-video flex justify-center items-center mb-6">
+        <img id="mjpegStream" src="/stream" alt="" class="hidden" crossorigin="anonymous">
+        <canvas id="canvas" class="w-full h-full object-contain"></canvas>
+        <div id="fps" class="absolute top-2 right-2 bg-black/70 px-2 py-1 rounded text-amber-400 font-mono text-sm">FPS: 0</div>
+    </div>
+
+    <!-- CONTENEDOR MODO VOZ -->
+    <div id="panelVoice" class="hidden w-full max-w-2xl bg-slate-800 rounded-xl p-8 flex flex-col items-center justify-center mb-6 border-2 border-slate-700">
+        <div id="micIcon" class="text-6xl mb-6 bg-slate-700 p-6 rounded-full transition-all">🎤</div>
+        <p class="text-center text-slate-400 mb-4">Di comandos como:<br><b class="text-white">"Adelante" - "Atrás" - "Izquierda" - "Derecha" - "Para"</b></p>
+        <div id="voiceLog" class="w-full bg-slate-900 p-4 rounded-lg font-mono text-center text-blue-400 min-h-[60px] flex items-center justify-center">
+            Esperando comando de voz...
+        </div>
+    </div>
+
+    <!-- CONTENEDOR MODO MANUAL -->
+    <div id="panelManual" class="grid grid-cols-3 gap-2 w-full max-w-[250px] mb-8">
+        <div></div>
+        <!-- Nota: Mantengo tus ángulos manuales actualizados -->
+        <button class="ctrl-btn bg-slate-700 hover:bg-slate-600 p-4 rounded-lg flex justify-center text-2xl" data-angle="90" data-speed="200" data-reverse="false">⬆️</button>
+        <div></div>
+        <button class="ctrl-btn bg-slate-700 hover:bg-slate-600 p-4 rounded-lg flex justify-center text-2xl" data-angle="180" data-speed="150" data-reverse="false">⬅️</button>
+        <button id="btnStop" class="bg-red-600 hover:bg-red-500 p-4 rounded-lg flex justify-center font-bold text-white shadow-[0_0_15px_rgba(220,38,38,0.5)]">STOP</button>
+        <button class="ctrl-btn bg-slate-700 hover:bg-slate-600 p-4 rounded-lg flex justify-center text-2xl" data-angle="0" data-speed="150" data-reverse="false">➡️</button>
+        <div></div>
+        <button class="ctrl-btn bg-slate-700 hover:bg-slate-600 p-4 rounded-lg flex justify-center text-2xl" data-angle="90" data-speed="200" data-reverse="true">⬇️</button>
+        <div></div>
+    </div>
+
 <script>
 // ==================== CONFIGURACIÓN ====================
-const WS_URL = `ws://${window.location.hostname}:81`;
+const WS_URL = `ws://${window.location.hostname}:81`; 
 const INPUT_SIZE = 640;
 const CONF_THRESHOLD = 0.25;
 const IOU_THRESHOLD = 0.45;
-const CLASS_TARGET = 0;
+const CLASS_TARGET = 0; 
 
 const CMD_STOP  = 0x00;
 const CMD_DRIVE = 0x01;
 const CMD_HEART = 0x02;
+
+const DISTANCIA_SEGURA = 5;
+const DISTANCIA_PRECAUCION = 15;
+
 
 // ==================== VARIABLES GLOBALES ====================
 let ws = null;
@@ -234,155 +100,96 @@ let fpsCounter = 0;
 let lastFpsTime = performance.now();
 let animationFrameId = null;
 let manualInterval = null;
-let lastSentCommand = { angle: 90, speed: 0, xCent: 128, yCent: 128 };
-let lastSendTime = 0;
-const MIN_SEND_INTERVAL = 50; // 20Hz máximo
+let heartbeatInterval = null;
+let voiceRecognition = null;
+// ==================== VARIABLES DE SENSORES (Añadir al inicio) ====================
+// Variables globales para sensores ToF
+let tofFrontal = 255;  // cm (255 = sin obstáculo)
+let tofIzquierdo = 255;
+let tofDerecho = 255;
+
+// Capturamos el div de FPS correctamente
+const fpsDiv = document.getElementById('fps'); 
 
 const imgStream = document.getElementById('mjpegStream');
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
-const fpsDiv = document.getElementById('fps');
 const lblStatus = document.getElementById('lblStatus');
 const wsStatus = document.getElementById('wsStatus');
-
-// Canvas global reutilizable para YOLO (Evita Garbage Collection)
 const resizeCanvas = document.createElement('canvas');
 resizeCanvas.width = INPUT_SIZE;
 resizeCanvas.height = INPUT_SIZE;
 const resizeCtx = resizeCanvas.getContext('2d');
 
-// ==================== SELECTOR DE MODO ====================
-document.querySelectorAll('.mode-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-        document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        currentMode = btn.dataset.mode;
-        
-        document.getElementById('modeManual').classList.toggle('active', currentMode === 'manual');
-        document.getElementById('modeYOLO').classList.toggle('active', currentMode === 'yolo');
-        
-        if (currentMode === 'yolo' && !session) {
-            initYOLO();
-        }
-        if (currentMode === 'manual') {
-            stop();
-        }
-        lblStatus.innerText = `✅ Modo: ${currentMode === 'manual' ? 'Manual' : 'YOLO Autónomo'}`;
-    });
-});
-
-// ==================== WEBSOCKET ====================
+// ==================== WEBSOCKET (Core Logic) ====================
 document.getElementById('btnConnect').addEventListener('click', () => {
-    if (ws && wsConnected) {
-        ws.close();
-        return;
-    }
-    connectWebSocket();
+    if (ws && wsConnected) ws.close(); else connectWebSocket();
 });
 
 function connectWebSocket() {
     lblStatus.innerText = '🔗 Conectando WebSocket...';
-    ws = new WebSocket(WS_URL);
-    ws.binaryType = 'arraybuffer';
-    
-    ws.onopen = () => {
-        wsConnected = true;
-        wsStatus.innerHTML = '🟢 WS';
-        lblStatus.innerText = '✅ Conectado - ' + (currentMode === 'manual' ? 'Modo Manual' : 'Modo YOLO');
-        // Iniciar heartbeat
-        //startHeartbeat();
-        // ==================== CONSTANTES ====================
-const CMD_STOP  = 0x00;
-const CMD_DRIVE = 0x01;  // Comando de movimiento (con centroides)
-const CMD_HEART = 0x02;  // Heartbeat (NO debe interferir con el control)
-
-/* Modificar el heartbeat para que NO afecte al control
-setInterval(() => {
-    if (wsConnected) {
-        // Enviar heartbeat SOLO si no hay movimiento activo
-        // O usar un comando separado que no afecte el seguimiento
-        if (currentMode !== 'yolo' || !isProcessing) {
-            sendPacket(CMD_HEART, 128, 128, 90, 0, false);
-        }
-    }
-}, 2000);*/
-    };
-    
-    ws.onclose = () => {
-        wsConnected = false;
-        wsStatus.innerHTML = '🔴 WS';
-        lblStatus.innerText = '❌ Desconectado. Reconectando...';
-        setTimeout(connectWebSocket, 1500);
-    };
-    
-    ws.onerror = () => {
-        wsConnected = false;
-        wsStatus.innerHTML = '🔴 WS';
-    };
-    
-    ws.onmessage = (event) => {
-        const data = new Uint8Array(event.data);
-        if (data[0] === 0xBB && data[1] === 0x66) {
-            updateHUD(data);
-        }
-    };
-}
-
-// Heartbeat inteligente - Mantiene la conexión viva sin interferir
-let lastCommandTime = 0;
-let heartbeatInterval = null;
-
-function startHeartbeat() {
-    if (heartbeatInterval) clearInterval(heartbeatInterval);
-    
-    heartbeatInterval = setInterval(() => {
-        if (!wsConnected) return;
+    try {
+        ws = new WebSocket(WS_URL);
+        ws.binaryType = 'arraybuffer';
         
-        const now = Date.now();
+        ws.onopen = () => {
+            wsConnected = true;
+            wsStatus.innerHTML = '🟢 WS';
+            lblStatus.innerText = `✅ Conectado - Modo ${currentMode.toUpperCase()}`;
+            if (heartbeatInterval) clearInterval(heartbeatInterval);
+            heartbeatInterval = setInterval(() => {
+                if (wsConnected && (currentMode === 'manual' || !isProcessing)) {
+                    sendPacket(CMD_HEART, 128, 128, 90, 0, false);
+                }
+            }, 2000);        
+        };
         
-        // Si han pasado más de 500ms desde el último comando YOLO
-        if (currentMode === 'yolo' && (now - lastCommandTime) > 500) {
-            // Enviar heartbeat para mantener el sistema activo
-            // Usar el último comando conocido o un comando neutro
-            if (lastValidCommand) {
-                // Reenviar el último comando válido
-                sendPacket(CMD_DRIVE, 
-                          lastValidCommand.xCent, 
-                          lastValidCommand.yCent, 
-                          lastValidCommand.angle, 
-                          lastValidCommand.speed, 
-                          false);
-                console.log("💓 Heartbeat: reenviando último comando");
-            } else {
-                // Comando neutro (centro, sin movimiento)
-                sendPacket(CMD_HEART, 128, 128, 90, 0, false);
+        ws.onclose = () => {
+            wsConnected = false;
+            wsStatus.innerHTML = '🔴 WS';
+            lblStatus.innerText = '❌ Desconectado. Reconectando...';
+            if (heartbeatInterval) clearInterval(heartbeatInterval);
+            setTimeout(connectWebSocket, 1500);
+        };
+        ws.onmessage = (event) => {
+            const data = new Uint8Array(event.data);
+            if (data[0] === 0xBB && data[1] === 0x66) {
+                updateHUD(data);
+                // Supongamos que mandas los ToF en los bytes 4, 5 y 6 del paquete
+                // Ver si va aca o en updateHUD, dependiendo de si quieres que se actualicen en el HUD o solo en las variables
+                //tofFrontal = data[4];
+                //tofDerecho = data[5];
+                //tofIzquierdo = data[6];
             }
-        } else if (currentMode === 'manual') {
-            // En modo manual, solo mantener conexión
-            sendPacket(CMD_HEART, 128, 128, 90, 0, false);
-        }
-    }, 1000); // Cada 1 segundo
+        };
+        ws.onmessage = (event) => {
+            const data = new Uint8Array(event.data);
+            if (data[0] === 0xBB && data[1] === 0x66) updateHUD(data);
+        };
+    } catch (e) { lblStatus.innerText = '⚠️ Error iniciando WS.'; }
 }
-
-// Guardar el último comando válido
-let lastValidCommand = null;
-
 
 function updateHUD(data) {
     const bat = data[2] || 0;
     const spd = data[3] || 0;
-    const distF = data[4] || 0;
-    const distL = data[5] || 0;
-    const distR = data[6] || 0;
-    
+    // Usar !== undefined para no confundir 0 con "sin dato"
+    tofFrontal = data[4] !== undefined ? data[4] : 255;
+    tofIzquierdo = data[5] !== undefined ? data[5] : 255;
+    tofDerecho = data[6] !== undefined ? data[6] : 255;
+    //tofFrontal = data[4] || 255;
+    //tofIzquierdo = data[5] || 255;
+    //tofDerecho = data[6] || 255;
+    // Debug: ver valores reales
+    console.log(`ToF: F=${tofFrontal} L=${tofIzquierdo} R=${tofDerecho}`);
+    console.log(`Telemetría cruda: [${Array.from(data).join(', ')}]`);
+    console.log(`ToF parseado: F=${data[4]} L=${data[5]} R=${data[6]}`);
     document.getElementById('hud').innerHTML = `
         <span>🔋 ${bat}%</span>
-        <span>📏 F:${distF} L:${distL} R:${distR} cm</span>
+        <span>📏 F:${tofFrontal} L:${tofIzquierdo} R:${tofDerecho} cm</span>
         <span>⚡ ${spd}</span>
-        ${wsConnected ? '<span>🟢 WS</span>' : '<span>🔴 WS</span>'}
-    `;
+        ${wsConnected ? '<span class="text-emerald-400">🟢 WS</span>' : '<span class="text-red-400">🔴 WS</span>'}
+      `;
 }
-
 // ==================== PAQUETE BINARIO ====================
 function buildPacket(cmdId, xCent, yCent, angleDeg, speed, reverse = false) {
     const buf = new ArrayBuffer(12);
@@ -414,28 +221,126 @@ function crc8(data) {
     }
     return crc;
 }
-
 function sendPacket(cmdId, xCent, yCent, angleDeg, speed, reverse) {
     if (!ws || !wsConnected) return;
-    
     // Para debug: mostrar qué se envía
     if (cmdId === CMD_DRIVE && speed > 0) {
         console.log(`📤 Enviando: cmd=${cmdId} centro=(${xCent},${yCent}) ang=${angleDeg} vel=${speed}`);
     }
-    
     const packet = buildPacket(cmdId, xCent, yCent, angleDeg, speed, reverse);
     ws.send(packet.buffer);
 }
 
-function drive(angle, speed, reverse = false) {
-    sendPacket(CMD_DRIVE, 128, 128, angle, speed, reverse);
+function drive(angle, speed, reverse = false) { sendPacket(CMD_DRIVE, 128, 128, angle, speed, reverse); }
+function stop() { sendPacket(CMD_STOP, 128, 128, 90, 0, false); }
+
+// ==================== MODO VOZ (Speech API) ====================
+function startVoiceRecognition() {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+        document.getElementById('voiceLog').innerHTML = "⚠️ Tu navegador no soporta reconocimiento de voz. Usa Chrome.";
+        return;
+    }
+
+    if (!voiceRecognition) {
+        voiceRecognition = new SpeechRecognition();
+        voiceRecognition.lang = 'es-ES';
+        voiceRecognition.continuous = true;
+        voiceRecognition.interimResults = false;
+
+        voiceRecognition.onstart = () => {
+            document.getElementById('micIcon').classList.add('mic-active', 'bg-red-900');
+            document.getElementById('voiceLog').innerText = "Escuchando... (Di 'Adelante', 'Atrás', 'Para'...)";
+        };
+
+        voiceRecognition.onresult = (event) => {
+            if (currentMode !== 'voice') return;
+            // Tomar la última frase dicha
+            const lastResultIndex = event.results.length - 1;
+            const command = event.results[lastResultIndex][0].transcript.toLowerCase().trim();
+            document.getElementById('voiceLog').innerHTML = `🎙️ Comando detectado:<br><b>"${command}"</b>`;
+            
+            processVoiceCommand(command);
+        };
+
+        voiceRecognition.onerror = (event) => {
+            console.error("Error de voz:", event.error);
+            document.getElementById('micIcon').classList.remove('mic-active', 'bg-red-900');
+            if(currentMode === 'voice') setTimeout(() => voiceRecognition.start(), 1000);
+        };
+
+        voiceRecognition.onend = () => {
+            document.getElementById('micIcon').classList.remove('mic-active', 'bg-red-900');
+            // Reiniciar automáticamente si seguimos en modo voz
+            if (currentMode === 'voice') voiceRecognition.start();
+        };
+    }
+    
+    try { voiceRecognition.start(); } catch(e) {} // Evitar error si ya está corriendo
 }
 
-function stop() {
-    sendPacket(CMD_STOP, 128, 128, 90, 0, false);
+function stopVoiceRecognition() {
+    if (voiceRecognition) {
+        voiceRecognition.stop();
+        document.getElementById('micIcon').classList.remove('mic-active', 'bg-red-900');
+    }
 }
 
-// ==================== CONTROLES MANUALES ====================
+function processVoiceCommand(cmd) {
+    // Buscar palabras clave en la frase
+    if (cmd.includes('adelante') || cmd.includes('avanza') || cmd.includes('vamos')) {
+        drive(90, 200, false);
+    } else if (cmd.includes('atrás') || cmd.includes('reversa') || cmd.includes('retrocede')) {
+        drive(90, 200, true);
+    } else if (cmd.includes('izquierda')) {
+        drive(180, 150, false); // Asumiendo 180 es izquierda para tu hardware
+    } else if (cmd.includes('derecha')) {
+        drive(0, 150, false);   // Asumiendo 0 es derecha para tu hardware
+    } else if (cmd.includes('para') || cmd.includes('alto') || cmd.includes('detente') || cmd.includes('stop')) {
+        stop();
+    }
+}
+
+// ==================== GESTIÓN DE MODOS (REEMPLAZAR) ====================
+document.querySelectorAll('.mode-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        currentMode = btn.dataset.mode;
+        
+        // Mostrar/Ocultar Paneles
+        document.getElementById('panelManual').classList.toggle('hidden', currentMode !== 'manual');
+        document.getElementById('panelYolo').classList.toggle('hidden', currentMode !== 'yolo');
+        document.getElementById('panelVoice').classList.toggle('hidden', currentMode !== 'voice');
+        
+        stop(); // Detener el robot por seguridad al cambiar de modo
+        
+        // --- CONTROL DEL STREAM DE LA CÁMARA ---
+        if (currentMode === 'yolo') {
+            // Pon aquí la IP o endpoint exacto de la cámara de tu ESP32-S3 (ej: /stream, :80/stream, etc.)
+            imgStream.src = `http://${window.location.hostname}/stream`; 
+            
+            if (!session) {
+                initYOLO();
+            } else {
+                startYOLOLoop();
+            }
+        } else {
+            // Apagamos el stream si salimos de YOLO para no saturar el ESP32
+            imgStream.src = ""; 
+            if (animationFrameId) {
+                cancelAnimationFrame(animationFrameId);
+            }
+        }
+        
+        if (currentMode === 'voice') startVoiceRecognition();
+        else stopVoiceRecognition();
+
+        lblStatus.innerText = `✅ Modo: ${currentMode.toUpperCase()}`;
+    });
+});
+/*
+// ==================== EVENTOS MANUALES ====================
 document.querySelectorAll('.ctrl-btn').forEach(btn => {
     btn.addEventListener('pointerdown', (e) => {
         e.preventDefault();
@@ -447,36 +352,21 @@ document.querySelectorAll('.ctrl-btn').forEach(btn => {
         clearInterval(manualInterval);
         manualInterval = setInterval(() => drive(angle, speed, reverse), 100);
     });
-    
-    btn.addEventListener('pointerup', (e) => {
-        e.preventDefault();
-        clearInterval(manualInterval);
-        stop();
-    });
-    
-    btn.addEventListener('pointerleave', () => {
-        clearInterval(manualInterval);
-        stop();
-    });
+    btn.addEventListener('pointerup', (e) => { e.preventDefault(); clearInterval(manualInterval); stop(); });
+    btn.addEventListener('pointerleave', () => { clearInterval(manualInterval); stop(); });
 });
-
+*/
 document.getElementById('btnStop').addEventListener('click', stop);
 
-// ==================== YOLO ====================
+// ==================== YOLO (Oculto en resumen) ====================
+// (Aquí iría todo el código de YOLO11n que ya revisamos anteriormente)
 async function initYOLO() {
-    lblStatus.innerText = '⏳ Cargando yolo11n.onnx...';
+    lblStatus.innerText = '⏳ Cargando YOLO11n...';
     try {
-        session = await ort.InferenceSession.create(
-        'https://pemazzara.github.io/robot-models/yolo11n.onnx',
-        { 
-            executionProviders: ['webgl','wasm'], 
-            graphOptimizationLevel: 'all' 
-        });
-        lblStatus.innerText = '📹 YOLO listo. Detectando...';
-        startYOLOLoop();
-    } catch (e) {
-        lblStatus.innerText = '❌ Error ONNX: ' + e.message;
-    }
+        session = await ort.InferenceSession.create('https://pemazzara.github.io/robot-models/yolo11n.onnx', { executionProviders: ['wasm'] });
+        lblStatus.innerText = '📹 YOLO listo.';
+        startYOLOLoop(); // (Lógica de YOLO abreviada por legibilidad)
+    } catch (e) { lblStatus.innerText = '❌ Error ONNX.'; }
 }
 
 function startYOLOLoop() {
@@ -622,66 +512,7 @@ function processOutput(outputMap, ow, oh) {
     
     return applyNMS(detections);
 }
-/*
-function processOutput(outputMap, ow, oh) {
-    let output = null;
-    for (const key of Object.keys(outputMap)) { output = outputMap[key]; break; }
-    if (!output) return [];
-    
-    const data = output.data;
-    const dims = output.dims;
-    const numClasses = dims[1] - 4;
-    const numAnchors = dims[2];
-    const detections = [];
-    
-    for (let c = 0; c < numAnchors; c++) {
-        let maxConf = 0, bestClass = -1;
-        for (let r = 0; r < numClasses; r++) {
-            const conf = data[(4 + r) * numAnchors + c];
-            if (conf > maxConf) { maxConf = conf; bestClass = r; }
-        }
-        
-        if (maxConf > CONF_THRESHOLD) {
-            let cx = data[0 * numAnchors + c];
-            let cy = data[1 * numAnchors + c];
-            let w  = data[2 * numAnchors + c];
-            let h  = data[3 * numAnchors + c];
-            
-            // ============ CORRECCIÓN DE COORDENADAS ============
-            // Si las coordenadas son > 1.0, están en píxeles absolutos (0-640)
-            // Si son <= 1.0, están normalizadas (0-1)
-            if (cx > 1.0 || cy > 1.0 || w > 1.0 || h > 1.0) {
-                // Coordenadas absolutas: convertir a píxeles de la imagen original
-                cx = (cx / INPUT_SIZE) * ow;
-                cy = (cy / INPUT_SIZE) * oh;
-                w  = (w  / INPUT_SIZE) * ow;
-                h  = (h  / INPUT_SIZE) * oh;
-            } else {
-                // Coordenadas normalizadas: convertir a píxeles de la imagen original
-                cx = cx * ow;
-                cy = cy * oh;
-                w  = w  * ow;
-                h  = h  * oh;
-            }
-            
-            const x1 = cx - w / 2;
-            const y1 = cy - h / 2;
-            const x2 = cx + w / 2;
-            const y2 = cy + h / 2;
-            
-            detections.push({
-                x1, y1, x2, y2,
-                cx, cy,
-                w, h,
-                confidence: maxConf,
-                class: bestClass
-            });
-        }
-    }
-    
-    return applyNMS(detections);
-}
-*/
+
 function applyNMS(dets) {
     dets.sort((a, b) => b.confidence - a.confidence);
     const keep = [];
@@ -746,42 +577,48 @@ function drawDetections(dets) {
         }
     }
 }
-
 function sendDrivingCommand(target, fw, fh) {
+    // 1. Cálculo del ángulo por visión
     const errorX = target.cx - fw / 2;
     let angleDeg = 90 - (errorX / (fw / 2)) * 45;
     angleDeg = Math.max(0, Math.min(180, angleDeg));
 
+    // 2. Cálculo de velocidad por tamaño
     const areaRatio = (target.w * target.h) / (fw * fh);
-
-    const MIN_SPEED = 0;
-    const MAX_SPEED = 255;
-    const AREA_FRENO = 0.6;
-    const AREA_LENTO = 0.3;
-    const AREA_MEDIO = 0.1;
-
+    const AREA_FRENO = 0.6, AREA_LENTO = 0.3, AREA_MEDIO = 0.1;
     let speed;
     if (areaRatio >= AREA_FRENO) {
-        speed = 0; // Freno total
+        speed = 0;
     } else if (areaRatio >= AREA_LENTO) {
-        // CORRECCIÓN: Frena progresivamente de 80 hacia 0 a medida que se acerca
         speed = Math.round(((AREA_FRENO - areaRatio) / (AREA_FRENO - AREA_LENTO)) * 80);
     } else if (areaRatio >= AREA_MEDIO) {
-        // CORRECCIÓN: Reduce progresivamente de 180 hacia 80
         speed = Math.round(80 + ((AREA_LENTO - areaRatio) / (AREA_LENTO - AREA_MEDIO)) * 100);
     } else {
-        // Lejos: Velocidad alta, acelerando a medida que se aleja (hasta 255)
         speed = Math.round(180 + ((AREA_MEDIO - areaRatio) / AREA_MEDIO) * 75);
-        speed = Math.min(MAX_SPEED, speed);
+        speed = Math.min(255, speed);
+    }
+    speed = Math.max(0, Math.min(255, speed));
+
+    // 3. Fusión con sensores ToF
+
+    if (tofFrontal < DISTANCIA_SEGURA) {
+        speed = 0;
+    } else if (tofFrontal < DISTANCIA_PRECAUCION) {
+        speed = Math.round(speed * (tofFrontal - DISTANCIA_SEGURA) / (DISTANCIA_PRECAUCION - DISTANCIA_SEGURA));
     }
 
-    speed = Math.max(MIN_SPEED, Math.min(MAX_SPEED, speed));
-    
+    if (angleDeg < 75 && tofDerecho < DISTANCIA_SEGURA) {
+        angleDeg = 90;
+    } else if (angleDeg > 105 && tofIzquierdo < DISTANCIA_SEGURA) {
+        angleDeg = 90;
+    }
+
+    // 4. Enviar
     const xCent = Math.round((target.cx / fw) * 255);
     const yCent = Math.round((target.cy / fh) * 255);
-    
-    console.log(`🚗 Comando: area=${areaRatio.toFixed(3)} speed=${speed} angle=${angleDeg.toFixed(1)}°`);
-    
+
+    console.log(`🚗 Comando: area=${areaRatio.toFixed(3)} speed=${speed} angle=${angleDeg.toFixed(1)}° | ToF F:${tofFrontal} L:${tofIzquierdo} R:${tofDerecho}cm`);
+
     sendPacket(CMD_DRIVE, xCent, yCent, angleDeg, speed, false);
 }
 
