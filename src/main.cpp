@@ -97,10 +97,9 @@ SensorData_t globalSensorData;
 
 
 // ==================== WI-FI ====================
-//const char *ssid = "Mi_ssid";
-//const char *password = "Mi_contraseña";
-const char *ssid = "Hervidero";
-const char *password = "lSdS,seemm,slh+gqshielhpdlti";
+const char *ssid = "Mi_ssid";
+const char *password = "Mi_contraseña";
+
 
 // ==================== SERVIDORES ====================
 WebServer serverHTTP(80);
@@ -242,46 +241,72 @@ void onWebSocketEvent(uint8_t num, WStype_t type, uint8_t *payload, size_t lengt
             Serial.printf("[%u] Cliente desconectado\n", num);
             lastCommandTime.store(0, std::memory_order_release);
             break;
+
     case WStype_BIN:
-            if (length == 12 && payload[0] == 0xAA && payload[1] == 0x55) {
-                uint8_t calcCrc = crc8(payload + 2, 9);
-                if (calcCrc == payload[11]) {
-                    ControlPacket* pkt = (ControlPacket*)payload;
+    if (length == 12 && payload[0] == 0xAA && payload[1] == 0x55) {
+        uint8_t calcCrc = crc8(payload + 2, 9);
+        if (calcCrc == payload[11]) {
+            ControlPacket* pkt = (ControlPacket*)payload;
             
-                    // ACTUALIZAR lastCommandTime SIEMPRE que llegue un paquete válido
-                    // independientemente del cmdId
-                    lastCommandTime.store(millis(), std::memory_order_release);
+            // Siempre actualizar timestamp para evitar failsafe
+            lastCommandTime.store(millis(), std::memory_order_release);
             
-                    // Para cmdId=0 (STOP) o cmdId=2 (HEARTBEAT), no actualizar centroides
-                    if (pkt->cmdId == 0x00 || pkt->cmdId == 0x02) {
-                        // No modificar targetXCentroid, targetYCentroid, etc.
-                        // Solo actualizar timestamp para evitar failsafe
-                        static uint32_t lastIgnoreLog = 0;
-                        if (millis() - lastIgnoreLog > 5000) {
-                            Serial.printf("❤️ Heartbeat/Stop recibido (Cmd=%d), timestamp actualizado\n", pkt->cmdId);
-                            lastIgnoreLog = millis();
-                        }
-                        return;  // No procesar centroides
+            // Según el comando, actuar de forma diferente
+            switch (pkt->cmdId) {
+                case 0x00: // STOP
+                    targetSpeed.store(0, std::memory_order_release);
+                    Serial.printf("📥 WS STOP: Velocidad forzada a 0\n");
+                    break;
+                    
+                case 0x01: // DRIVE
+                    targetAngle.store(pkt->angle / 10.0f, std::memory_order_relaxed);
+                    targetSpeed.store(pkt->speed, std::memory_order_relaxed);
+                    Serial.printf("📥 WS DRIVE: Ang=%.1f° Vel=%d\n", pkt->angle / 10.0f, pkt->speed);
+                    break;
+                    
+                case 0x02: // HEARTBEAT
+                    // Solo actualizar timestamp, no modificar velocidad ni ángulo
+                    // El log se imprime cada 5 segundos para no saturar
+                    static uint32_t lastHeartbeatLog = 0;
+                    if (millis() - lastHeartbeatLog > 5000) {
+                        Serial.println("💓 Heartbeat recibido");
+                        lastHeartbeatLog = millis();
                     }
-            
-                    // Solo para CMD_DRIVE (0x01) actualizar centroides
-                    if (pkt->cmdId == 0x01) {
-                        targetXCentroid.store(pkt->xCentroid, std::memory_order_release);
-                        targetYCentroid.store(pkt->yCentroid, std::memory_order_release);
-                        targetAngle.store(pkt->angle / 10.0f, std::memory_order_release);
-                        targetSpeed.store(pkt->speed, std::memory_order_release);
-                
-                        Serial.printf("✅ [%u] Centro=(%d,%d) Ang=%.1f° Vel=%d Cmd=%d\n",
-                              num, pkt->xCentroid, pkt->yCentroid,
-                              pkt->angle / 10.0f, pkt->speed, pkt->cmdId);
-                    }
-                }
+                    break;
+                    
+                default:
+                    Serial.printf("⚠️ Comando desconocido: 0x%02X\n", pkt->cmdId);
+                    break;
             }
-            break;
+        } else {
+            Serial.printf("❌ CRC error: calc=0x%02X recv=0x%02X\n", calcCrc, payload[11]);
+        }
+    } else {
+        Serial.printf("⚠️ Paquete inválido: %d bytes\n", length);
+    }
+    break;
+    
     }
 }
 
-
+uint8_t mapTo8Bit(uint16_t distance_mm) {
+    uint8_t distance_tx;
+    
+    // 1. Validar si el sensor falló o está fuera de rango
+    if (distance_mm > 4000 || distance_mm == 0) { 
+        distance_tx = 255; // Código de "zona libre / infinito"
+    } else {
+        uint16_t distance_cm = distance_mm / 10;    
+        
+        // 2. Aplicar saturación para evitar el overflow en 8 bits
+        if (distance_cm > 254) {
+            distance_tx = 254; 
+        } else {
+            distance_tx = (uint8_t)distance_cm;
+        }
+    }
+    return distance_tx;    
+}
 // ==================== ENVIAR TELEMETRÍA POR WEBSOCKET ====================
 
 void sendTelemetry() {
@@ -292,11 +317,12 @@ void sendTelemetry() {
     telemetry[1] = 0x66;
     telemetry[2] = 85;  // Batería (simulada)
     telemetry[3] = targetSpeed.load(std::memory_order_relaxed);
-    // Añadir sensores reales aquí
-    telemetry[4] = globalSensorData.tofFront;   // Distancia frontal
-    telemetry[5] = globalSensorData.tofLeft;    // Distancia izquierda
-    telemetry[6] = globalSensorData.tofRight;   // Distancia derecha
 
+    telemetry[4] = mapTo8Bit(globalSensorData.tofFront);   // Distancia frontal
+    telemetry[5] = mapTo8Bit(globalSensorData.tofLeft);    // Distancia izquierda
+    telemetry[6] = mapTo8Bit(globalSensorData.tofRight);   // Distancia derecha
+Serial.printf("📡 Enviando Telemetría: Batería=%d%% Vel=%d ToF F:%dcm L:%dcm R:%dcm\n", 
+              telemetry[2], telemetry[3], telemetry[4], telemetry[5], telemetry[6]);
     webSocket.broadcastBIN(telemetry, sizeof(telemetry));
 }
 

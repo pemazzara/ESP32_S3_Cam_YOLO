@@ -152,13 +152,24 @@ void MotorControl::setPWM(int16_t pwm, int16_t targetAngle, bool immediate) {
     if (!ledc_initialized) return;
     if (abs(targetAngle) > 360) return;
     
-    // Suavizado del ángulo (Interpolación Lineal hacia el target)
-    // 1. Suavizar el ángulo (Slew Rate)
-    const float ANGLE_STEP = 3.0f;
-    if (abs(targetAngle - currentInterpolatedAngle) > 0.5f) {
-        if (currentInterpolatedAngle < targetAngle) currentInterpolatedAngle += ANGLE_STEP;
-        else currentInterpolatedAngle -= ANGLE_STEP;
-    }
+    // 1. Calcular la diferencia angular
+float angleDiff = targetAngle - currentInterpolatedAngle;
+
+// 2. Normalizar la diferencia entre -180 y 180 grados
+while (angleDiff < -180.0f) angleDiff += 360.0f;
+while (angleDiff > 180.0f) angleDiff -= 360.0f;
+
+// 3. Aplicar el ANGLE_STEP en la dirección más corta
+const float ANGLE_STEP = 3.0f;
+if (abs(angleDiff) > 0.5f) {
+    if (angleDiff > 0) currentInterpolatedAngle += ANGLE_STEP;
+    else currentInterpolatedAngle -= ANGLE_STEP;
+}
+
+// 4. Mantener el ángulo actual acotado entre [0, 360)
+if (currentInterpolatedAngle < 0.0f) currentInterpolatedAngle += 360.0f;
+if (currentInterpolatedAngle >= 360.0f) currentInterpolatedAngle -= 360.0f;
+ 
     // Aplicar la cinemática con el ángulo suavizado
     float rad = (currentInterpolatedAngle * M_PI) / 180.0;
     float giro = cos(rad);
