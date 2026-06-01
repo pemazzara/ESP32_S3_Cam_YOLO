@@ -1,5 +1,7 @@
 // main.cpp - ESP32 con FreeRTOS
 // https://www.oceanlabz.in/getting-started-with-esp32-s3-wroom-n16r8-cam-dev-board/
+// Para activar microfono en Chrome: chrome://flags/#unsafely-treat-insecure-origin-as-secure
+// chrome://flags/#unsafely-treat-insecure-origin-as-secure
 #include <Arduino.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
@@ -29,10 +31,9 @@ TaskHandle_t httpTaskHandle = NULL;
 
 // ==================== VARIABLES ATÓMICAS DE CONTROL ====================
 // Para comunicación entre cores
-std::atomic<float> targetAngle{90.0f};
-std::atomic<int> targetSpeed{0};
-std::atomic<uint16_t> targetXCentroid{0};  // Nuevo
-std::atomic<uint16_t> targetYCentroid{0};  // Nuevo
+// Variables de control compartidas (las que ya actualiza tu WebSocket)
+
+
 std::atomic<uint32_t> lastCommandTime{0};
 // Variables globales adicionales
 std::atomic<uint32_t> lastValidCommandTime{0};
@@ -41,8 +42,15 @@ std::atomic<uint16_t> lastValidXCentroid{0};
 std::atomic<uint16_t> lastValidYCentroid{0};
 std::atomic<float> lastValidAngle{0};
 std::atomic<uint8_t> lastValidSpeed{0};
+std::atomic<float> targetAngle{90.0f};
+std::atomic<int> targetSpeed{0};
+std::atomic<uint16_t> targetXCentroid{0};  // Nuevo
+std::atomic<uint16_t> targetYCentroid{0};  // Nuevo
+// Contadores de pulsos ISR
+std::atomic<uint32_t> pulsesLeft{0};
+std::atomic<uint32_t> pulsesRight{0};
 
- 
+
 // ==================== MUTEX ====================
 SemaphoreHandle_t sensorMutex;
 
@@ -83,9 +91,16 @@ void printResetReason();
 void tofSensorTask(void *pvParameters);
 void httpTask(void *pvParameters);
 void motorTask(void *pvParameters);
+// ==================== PROTOTIPOS DE FUNCIONES ISR ====================
+void IRAM_ATTR isrLeft()  { 
+    pulsesLeft.fetch_add(1, std::memory_order_relaxed); 
+}
+void IRAM_ATTR isrRight() { 
+    pulsesRight.fetch_add(1, std::memory_order_relaxed); 
+}
 
 
-//void checkJTAGPins();
+void checkJTAGPins();
 void speedsToSpeedAngle(int16_t left, int16_t right, int& speed, int& angle);
 
 
@@ -97,13 +112,25 @@ SensorData_t globalSensorData;
 
 
 // ==================== WI-FI ====================
-const char *ssid = "Mi_ssid";
-const char *password = "Mi_contraseña";
-
+//const char *ssid = "Mi_ssid";
+//const char *password = "Mi_contraseña";
+// ==================== WI-FI REAL ====================
+const char *ssid = "Hervidero";
+const char *password = "lSdS,seemm,slh+gqshielhpdlti";
 
 // ==================== SERVIDORES ====================
 WebServer serverHTTP(80);
 WebSocketsServer webSocket(81); // Puerto 81 para WebSocket
+
+void setupEncoders() {
+    pinMode(PIN_ENCODER_LEFT, INPUT_PULLUP);  // Usa pullup interno
+    pinMode(PIN_ENCODER_RIGHT, INPUT_PULLUP);
+    
+    attachInterrupt(digitalPinToInterrupt(PIN_ENCODER_LEFT), isrLeft, RISING);
+    attachInterrupt(digitalPinToInterrupt(PIN_ENCODER_RIGHT), isrRight, RISING);
+    
+    Serial.println("✅ Encoders configurados en pines 14 y 47");
+}
 
 
 
@@ -326,36 +353,37 @@ Serial.printf("📡 Enviando Telemetría: Batería=%d%% Vel=%d ToF F:%dcm L:%dcm
     webSocket.broadcastBIN(telemetry, sizeof(telemetry));
 }
 
-bool autonomousMode = false;
 
+// Para el control de velocidad, vamos a implementar un controlador PID incremental 
+// que también incorpore corrección angular basada en el seguimiento visual del centroide. 
+// Esto permitirá que el robot no solo mantenga la velocidad deseada, sino que 
+// también corrija su trayectoria para seguir al objetivo detectado por la cámara.
+/*
 void motorTask(void *pvParameters) {
-    Serial.printf("⚙️ Motor Task en Core %d\n", xPortGetCoreID());
-    
     TickType_t xLastWakeTime = xTaskGetTickCount();
-    const TickType_t xFrequency = pdMS_TO_TICKS(20); // 50 Hz
-    // Variables para seguimiento continuo
-    float lastAngle = 90.0f;
+    const TickType_t xFrequency = pdMS_TO_TICKS(20); // 50 Hz estricto
     float lastPWM = 0;
-    // Configuración de seguimiento visual
-    const uint16_t CENTRO_X_REF = 160;  // Depende de tu resolución (ej. 320x240)
-    const uint16_t CENTRO_Y_REF = 120;
-    const float KP_ANGULAR = 0.5f;      // Ganancia proporcional para ángulo
-    const float KP_LINEAL = 0.3f;       // Ganancia para velocidad
+    
+    // Variables para debug no bloqueante
+    uint32_t lastDebugTime = 0;
+    uint32_t lastControlDebugTime = 0;
+
     for (;;) {
         vTaskDelayUntil(&xLastWakeTime, xFrequency);
         
         uint32_t ahora = millis();
-        uint32_t tUltimoCmd = lastCommandTime.load(std::memory_order_acquire);
-       // FAILSAFE: 1 segundo sin comandos -> parar
+        uint32_t tUltimoCmd = lastValidCommandTime.load(std::memory_order_acquire);
+        
+        // FAILSAFE: 1 segundo sin comandos -> parar
         if (ahora - tUltimoCmd > 1000) {
             if (lastPWM != 0) {
-                Serial.println("⚠️ FAILSAFE: Timeout, deteniendo");
+                Serial.println("⚠️ FAILSAFE: Timeout, deteniendo motores");
                 speedController.setTarget(90.0f, 0, 0, 0);
-                speedController.updateControl();
+                speedController.updateControl(); // Esto apaga motores y resetea integrales
                 lastPWM = 0;
             }
         } else {
-            // Leer valores actuales
+            // Leer valores actuales de los targets
             float angulo = targetAngle.load(std::memory_order_acquire);
             int velocidad = targetSpeed.load(std::memory_order_acquire);
             uint16_t xCent = targetXCentroid.load(std::memory_order_acquire);
@@ -364,17 +392,66 @@ void motorTask(void *pvParameters) {
             // Convertir velocidad (0-255) a PWM (0-1023)
             float pwm_target = (velocidad / 255.0f) * 1023.0f;
             
-            // DEBUG: Mostrar cada 1 segundo lo que se está enviando
-            static uint32_t lastDebug = 0;
-            if (millis() - lastDebug > 1000) {
-                Serial.printf("📊 Control: Ang=%.1f PWM=%.0f Centro=(%d,%d)\n", 
-                              angulo, pwm_target, xCent, yCent);
-                lastDebug = millis();
+            // Aplicar zona muerta para evitar vibraciones a bajas velocidades
+            if (velocidad < 5) {
+                pwm_target = 0;
             }
             
-            // Enviar al controlador (siempre, el controlador decide si hay seguimiento)
+            // Actualizar controlador de velocidad
             speedController.setTarget(angulo, pwm_target, xCent, yCent);
-            speedController.updateControl();
+            speedController.updateControl(); // 🛞 ¡Acá ocurre la magia bilateral!
+            lastPWM = pwm_target;
+            
+            // DEBUG: Mostrar información de control cada 1 segundo
+            if (ahora - lastControlDebugTime > 1000) {
+                Serial.printf("📊 Control: Ang=%.1f° Vel=%d PWM_Base=%.0f Centro=(%d,%d)\n", 
+                              angulo, velocidad, pwm_target, xCent, yCent);
+                
+                // También mostrar el estado actual del controlador
+                speedController.printDebug();
+                lastControlDebugTime = ahora;
+            }
+        }
+        
+        // DEBUG adicional: Mostrar pulsos de encoder cada 2 segundos
+        if (ahora - lastDebugTime > 2000) {
+            uint32_t pLeft = pulsesLeft.load(std::memory_order_acquire);
+            uint32_t pRight = pulsesRight.load(std::memory_order_acquire);
+            Serial.printf("🔧 Pulsos encoder (crudos): L=%d R=%d\n", pLeft, pRight);
+            lastDebugTime = ahora;
+        }
+    }
+}
+*/
+
+void motorTask(void *pvParameters) {
+    TickType_t xLastWakeTime = xTaskGetTickCount();
+    const TickType_t xFrequency = pdMS_TO_TICKS(20); // 50 Hz estricto
+    float lastPWM = 0;
+
+    for (;;) {
+        vTaskDelayUntil(&xLastWakeTime, xFrequency);
+        
+        uint32_t ahora = millis();
+        uint32_t tUltimoCmd = lastCommandTime.load(std::memory_order_acquire);
+        
+        if (ahora - tUltimoCmd > 1000) {
+            if (lastPWM != 0) {
+                Serial.println("⚠️ FAILSAFE: Timeout, deteniendo");
+                speedController.setTarget(90.0f, 0, 0, 0);
+                speedController.updateControl(); // Esto va a apagar motores y resetear integrales
+                lastPWM = 0;
+            }
+        } else {
+            float angulo = targetAngle.load(std::memory_order_acquire);
+            int velocidad = targetSpeed.load(std::memory_order_acquire);
+            uint16_t xCent = targetXCentroid.load(std::memory_order_acquire);
+            uint16_t yCent = targetYCentroid.load(std::memory_order_acquire);
+            
+            float pwm_target = (velocidad / 255.0f) * 1023.0f;
+            
+            speedController.setTarget(angulo, pwm_target, xCent, yCent);
+            speedController.updateControl(); // 🛞 ¡Acá ocurre la magia bilateral!
             lastPWM = pwm_target;
         }
     }
@@ -394,6 +471,7 @@ void setupFreeRTOS() {
         0);
 
     // Tasks en Core 1 (Ordenadas por prioridad real)
+    // Crear la tarea de control de bajo nivel a 20Hz (cada 50ms)
     // Serial.println("   Creando task MotorControl...");       
     xTaskCreatePinnedToCore(
         motorTask,
@@ -421,19 +499,33 @@ void setupFreeRTOS() {
     Serial.println("   - Core 0: HTTP Server (Prioridad Media)");   
 }
 
-
+/*
 void setup() {
     Serial.begin(115200);
-    
-    // SPIFFS
+    setupEncoders();
+    // 2. INICIALIZAR SPIFFS (¡CRÍTICO! Debe ir antes del servidor)
+    // El 'true' mapea y formatea automáticamente si el sistema de archivos está corrupto
     if (!SPIFFS.begin(true)) {
-        Serial.println("❌ Error SPIFFS");
+        Serial.println("❌ Error al montar SPIFFS. El servidor no podrá leer los archivos.");
+    } else {
+        Serial.println("📂 SPIFFS montado con éxito.");
     }
-    
+
+    // 3. CONFIGURAR EL SERVIDOR ASÍNCRONO
+    // Servimos la raíz, mapeamos a la raíz de SPIFFS y seteamos index.html por defecto
+    server.serveStatic("/", SPIFFS, "/")
+          .setDefaultFile("index.html"); 
+
+    // Aquí irían tus mapeos de WebSockets (si usas AsyncWebSocket)
+    // ws.onEvent(onWsEvent);
+    // server.addHandler(&ws);
+
+    // 4. ARRANCAR SERVIDOR HTTP
+    server.begin();
+    Serial.println("🚀 Servidor HTTP Asíncrono iniciado.");
     // Mutex
     sensorMutex = xSemaphoreCreateMutex();
- 
-    
+   
     // Wi-Fi
     WiFi.begin(ssid, password);
     while (WiFi.status() != WL_CONNECTED) {
@@ -474,7 +566,66 @@ void setup() {
     Serial.println("   Stream: http://" + WiFi.localIP().toString() + "/stream");
     Serial.println("   WS: ws://" + WiFi.localIP().toString() + ":81");
 }
+*/
+void setup() {
+    Serial.begin(115200);
+   
+        // SPIFFS
+    if (!SPIFFS.begin(true)) {
+        Serial.println("❌ Error SPIFFS");
+    }
+    
 
+    
+    // Inicializar Hardware Crítico e Interrupciones
+
+    setupCamera();
+    setupEncoders();
+    
+    sensors.begin(); // Inicializar sensores ToF VL53L0X
+    motorController.begin();
+    speedController.begin();
+    
+    // Creación de Semáforos
+    sensorMutex = xSemaphoreCreateMutex();
+
+    // 2. Conectar a Wi-Fi primero (Es vital tener IP antes de levantar servicios de red)
+    WiFi.begin(ssid, password);
+    Serial.print("🌐 Conectando a Wi-Fi");
+    while (WiFi.status() != WL_CONNECTED) {
+        delay(500);
+        Serial.print(".");
+    }
+    Serial.println("\n✅ Wi-Fi Conectado: " + WiFi.localIP().toString());
+    
+    // 3. Gestión de Memoria PSRAM y Cámara (Evitamos fragmentación)
+    Serial.printf("📊 PSRAM libre antes de la cámara: %d bytes\n", ESP.getFreePsram());
+    if (ESP.getFreePsram() < 2000000) { // Menos de 2MB libres
+        Serial.println("⚠️ PSRAM baja, reiniciando para limpiar...");
+        delay(1000);
+        ESP.restart();
+    }
+    
+    // 5. CONFIGURACIÓN DEL SERVIDOR HTTP ÚNICO (serverHTTP)
+    // Servir el archivo index.html directamente desde SPIFFS
+    serverHTTP.serveStatic("/", SPIFFS, "/index.html");
+    serverHTTP.on("/stream", handleMjpeg);
+    serverHTTP.begin();
+      
+    // WebSocket
+    webSocket.begin();
+    webSocket.onEvent(  onWebSocketEvent);
+    
+
+    // 7. Lanzar el Planificador de FreeRTOS (motorTask, etc.)
+    setupFreeRTOS();
+    
+    // Reporte Final por Consola
+    Serial.println("\n🤖 === SISTEMA YOLO ROBOT LISTO ===");
+    Serial.println("   Web Panel: http://" + WiFi.localIP().toString());
+    Serial.println("   Video Stream: http://" + WiFi.localIP().toString() + "/stream");
+    Serial.println("   WebSocket URL: ws://" + WiFi.localIP().toString() + ":81\n");
+}
 
 uint16_t fuseFrontalDistances(SensorData_t &data) {
     uint8_t confidence = 0;

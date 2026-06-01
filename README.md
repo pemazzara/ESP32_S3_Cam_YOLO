@@ -1,11 +1,53 @@
 ## 📄 **README.md**
-
-```markdown
-# 🤖 Robot Car Autónomo con YOLOv11n y ESP32-S3
+# 🤖 YOLO Robot - ESP32-S3 Firmware & Control Panel
 
 Robot seguidor de objetos con visión artificial en tiempo real. Usa una **ESP32-S3** con cámara OV2640 para transmitir video por Wi-Fi a un navegador web, donde **YOLOv11n** (ejecutado con ONNX Runtime) detecta personas y envía comandos de navegación por WebSocket. El ESP32 ejecuta un control PID a 50 Hz sobre dos motores con driver L298N, asistido por sensores VL53L0X ToF para frenado de emergencia.
 
+Este repositorio contiene el firmware de control y la interfaz web para un robot autónomo. El proyecto combina control de lazo cerrado en tiempo real, procesamiento de sensores, streaming de video y una arquitectura web optimizada para entornos embebidos.
+
 ---
+
+## 🚀 Características Principales
+
+* **Control PID de Lazo Cerrado (50Hz):** Implementación de un controlador de velocidad (`SpeedController`) con anti-windup inteligente, alimentación hacia adelante (*Feedforward* al 85%) y captura atómica de pulsos de encoders (`std::atomic`) para evitar condiciones de carrera.
+* **Arquitectura Multitarea (FreeRTOS):** Distribución de carga de trabajo asignando tareas críticas a núcleos específicos (`xTaskCreatePinnedToCore`). El Core 1 se encarga del lazo de control de los motores, mientras que el Core 0 gestiona la red y los periféricos de alta demanda.
+* **Servidor HTTP Unificado & Streaming:** Servidor web nativo que expone un stream de video en tiempo real (MJPEG desde cámara OV2640) en el puerto `80`, compartiendo el canal de forma segura con los archivos de la interfaz.
+* **Frontend Monolítico Ultra-liviano:** Interfaz de usuario diseñada con **Tailwind CSS**. Todo el HTML, CSS y JavaScript están unificados en un único archivo comprimido en la memoria flash (`index.html.gz`), reduciendo el uso de SPIFFS a menos de **15 KB** y minimizando las peticiones HTTP a una sola transacción.
+* **Telemetría por WebSockets:** Conexión full-duplex bidireccional en el puerto `81` para el envío de comandos de movimiento (paquetes binarios optimizados) y recepción de lecturas de sensores en tiempo real.
+
+---
+
+## 🛠️ Arquitectura de Software (Distribución de Núcleos)
+
+El firmware saca provecho del procesador de doble núcleo del ESP32-S3 mediante FreeRTOS:
+
+* **Core 0 (Comunicaciones y Video):**
+    * Servidor HTTP (`WebServer.h`) + Ruta de video `/stream`.
+    * Lazo de eventos de `WebSocketsServer`.
+    * Gestión de la pila Wi-Fi.
+* **Core 1 (Control y Sensores):**
+    * `navigationTask`: Lectura de sensores de distancia ToF (VL53L0X) y lógica de evasión.
+    * `motorTask`: Ejecución del PID de velocidad cada 20ms e inyección de PWM al puente H.
+
+---
+
+## 📂 Estructura del Proyecto
+
+```text
+src/
+├── main.cpp     # Punto de entrada, WiFi, WebSocket, FreeRTOS                  
+|                # Inicialización OV2640
+|                # Comunicación WebSocket
+├── motor_control.cpp/h   # Cinemática diferencial y L298N
+├── speed_controller.cpp/h # PID a 50 Hz
+├── sensor_control.cpp/h         # VL53L0X + HC-SR04                  
+├── data/
+│   └── index.html.gz       # Frontend monolítico (HTML+CSS+JS) comprimido con GZIP
+│   └── ...                 # Drivers de sensores y cámara
+├── platformio.ini          # Configuración del entorno de desarrollo y dependencias
+└── README.md
+
+
 
 ## 📐 Arquitectura
 
@@ -49,35 +91,44 @@ Navegador (HTML5 + ONNX Runtime Web) ──► YOLOv11n ──► Comandos (WebS
 
 ### Pinout
 
-| Componente | Pines ESP32-S3 |
-|------------|----------------|
-| Cámara OV2640 | Ver `src/main.cpp` |
-| L298N ENA | 48 |
-| L298N IN1 | 47 |
-| L298N IN2 | 21 |
-| L298N ENB | 2 |
-| L298N IN3 | 41 |
-| L298N IN4 | 42 |
+| Cámara OV2640 
+| Ver `src/main.cpp` y https://www.oceanlabz.in/getting-started-with-esp32-s3-wroom-n16r8-cam-dev-board/
 | VL53L0X (I2C) | SDA=4, SCL=5 |
-| HC-SR04 | TRIG=?, ECHO=? |
+| HC-SR04 | TRIG=?, ECHO=? | No conectado en esta trarjeta
 ![alt text](image.png)
-Ver:
-https://www.oceanlabz.in/getting-started-with-esp32-s3-wroom-n16r8-cam-dev-board/
 
-## 📦 Software
+## 📂 Estructura del Proyecto Software 
 
 ### ESP32 (PlatformIO)
 
-```
-src/
-├── main.cpp              # Punto de entrada, WiFi, WebSocket, tareas FreeRTOS
-├── camera.cpp/h          # Inicialización OV2640
-├── motor_control.cpp/h   # Cinemática diferencial y L298N
-├── speed_controller.cpp/h # PID a 50 Hz
-├── sensors.cpp/h         # VL53L0X + HC-SR04
-└── ble/                  # Comunicación WebSocket
-```
+esp32_s3_YOLO/
+├── src/
+│   ├── main.cpp        # Punto de entrada, WiFi, WebSocket, tareas FreeRTOS
+│   ├── camera_pins.h   # Coneccion OV2640 -Esp32
+│   ├── motor_control.cpp/h # Manejo de L298N
+│   ├── speed_controller.cpp/h # Cinemática diferencial, PID a 50 Hz
+|   ├── sonar_integration.cpp/h # HC-SR04
+|   └── sensor_control.cpp/h # Manejo VL53L0X
+├── data/
+│   └── index.html
+├── platformio.ini
+├── partitions_spiffs_big.csv
+└── README.md
+``````
+---
+## 🛠️ Arquitectura de Software (Distribución de Núcleos)
 
+El firmware saca provecho del procesador de doble núcleo del ESP32-S3 mediante FreeRTOS:
+
+* **Core 0 (Comunicaciones y Video):**
+    * `httpTask`: Servidor HTTP (`WebServer.h`) + Ruta de video `/stream`.
+    * Lazo de eventos de `WebSocketsServer`.
+    * Gestión de la pila Wi-Fi.
+* **Core 1 (Control y Sensores):**
+    * `tofSensorTask`: Lectura de sensores de distancia ToF (VL53L0X).
+    * `motorTask`: Ejecución del PID de velocidad cada 20ms e inyección de PWM al puente H.
+
+---
 ### Frontend (HTML5 + ONNX Runtime Web)
 
 - `data/index.html`: Interfaz completa con modo manual y autónomo.
@@ -169,25 +220,6 @@ float Ki = 0.3f;    // Ganancia integral
 
 ## 📁 Estructura del proyecto
 
-```
-esp32-robot-yolo/
-├── src/
-│   ├── main.cpp
-│   ├── camera.cpp
-│   ├── camera.h
-│   ├── motor_control.cpp
-│   ├── motor_control.h
-│   ├── speed_controller.cpp
-│   ├── speed_controller.h
-│   ├── sensors.cpp
-│   └── sensors.h
-├── data/
-│   └── index.html
-├── platformio.ini
-├── partitions_spiffs_big.csv
-└── README.md
-```
-
 ---
 
 ## 🔗 Dependencias
@@ -209,7 +241,6 @@ lib_deps =
 
 ## 📝 Licencia
 
-MIT © 2025 [Tu Nombre]
 
 ---
 
@@ -219,9 +250,6 @@ MIT © 2025 [Tu Nombre]
 - [Espressif](https://github.com/espressif/esp32-camera) por la librería de cámara.
 - [ONNX Runtime](https://onnxruntime.ai/) por la inferencia en navegador.
 ```
-
 ---
-
-## 📌 **Instrucciones para usar el README**
 
 

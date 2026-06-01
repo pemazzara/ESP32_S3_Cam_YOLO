@@ -1,12 +1,59 @@
-#ifndef SPEED_CONTROLLER_H
-#define SPEED_CONTROLLER_H
-
+// SpeedController.h
 /* 
 * Esta implementación sigue un patrón de diseño profesional 
 * (separación de responsabilidades entre sensado, control y actuadores). 
 * Estamos usando un controlador de velocidad incremental, 
 * lo cual es excelente para evitar saltos bruscos en los motores.
 */
+#ifndef SPEED_CONTROLLER_H
+#define SPEED_CONTROLLER_H
+
+#include <Arduino.h>
+#include <atomic>
+
+#define ENCODER_PPR 20  // Ajusta según tu encoder
+
+class SpeedController {
+private:
+    // Mutex para thread safety
+    SemaphoreHandle_t xSpeedControllerMutex;
+    
+    // Targets
+    float base_angle = 90.0f;
+    float target_pwm = 0.0f;
+    uint16_t x_centroid = 0;
+    uint16_t y_centroid = 0;
+    
+    // Variables PID
+    float integral_left = 0;
+    float integral_right = 0;
+    
+    // Variables de debug
+    int16_t last_pwm_left = 0;
+    int16_t last_pwm_right = 0;
+    float last_rpm_left = 0;
+    float last_rpm_right = 0;
+    float last_target_rpm_left = 0;
+    float last_target_rpm_right = 0;
+    
+    void resetIntegral();
+    
+public:
+    void begin();
+    void setTarget(float angle, float pwm, uint16_t xCent, uint16_t yCent);
+    void updateControl();
+    void stop();
+    void reset();
+    void printDebug();
+};
+
+#endif
+
+/*
+#ifndef SPEED_CONTROLLER_H
+#define SPEED_CONTROLLER_H
+
+
 
 #include <Arduino.h>
 
@@ -58,13 +105,13 @@ public:
     float getCurrentAvel();
     int16_t getCurrentPWM();
     float getLastError();
-    // Llamada desde la tarea de control del Slave (ej. 50Hz)
+    // Llamar desde el motorTask con los valores deseados
+    void setTarget(float angle, float pwm, uint16_t xCent = 0, uint16_t yCent = 0);
+    // Llamar desde el setup o una tarea de calibración para configurar K y tau
     void updateControl();
     void setGains(float kp, float ki) { Kp = kp; Ki = ki; }
-    // Llamada cuando llega un comando SPI del Master
-    void setTarget(float angle, float pwm, uint16_t xCent = 0, uint16_t yCent = 0);
+
     void setReferencePoint(uint16_t x, uint16_t y);  // Configurar centro de referencia
-    //void setTarget(int angle, float target_Sppeed_mm_s);
     void setCalibration(float K, float tau); 
     void setFeedforwardGain(float k) {
         K_ff = k;
@@ -75,3 +122,4 @@ public:
     //uint8_t getStatus();
 
 #endif
+*/

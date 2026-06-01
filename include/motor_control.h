@@ -72,7 +72,10 @@ definiciones.*/
 
 #define SAFETY_TIMEOUT_MS   2000  // 2 segundos en vez de 500ms
 //#define HEARTBEAT_TIMEOUT 1000   // 1 segundo
-
+// Pines asignados
+#define PIN_ENCODER_LEFT  19
+#define PIN_ENCODER_RIGHT 20
+#define ENCODER_PPR 20  // Pulsos por revolución de tu encoder
 
 // =========================================================
 // CLASE MOTOR CONTROLLER (Adaptada de MotorController.cpp)
@@ -113,14 +116,15 @@ private:
     void setMotorSpeeds(int leftSpeed, int rightSpeed);
     int smoothSpeed(int current, int target);
     int16_t applyRamp(int16_t current, int16_t target);
-    void applyHardwarePWM(int16_t left, int16_t right);
+    
 
 public:
     MotorControl() : ledc_initialized(false), targetLeftSpeed(0), 
                      targetRightSpeed(0), currentLeftSpeed(0), 
                      currentRightSpeed(0), lastUpdateTime(0) {}
     //void setSonar(SonarIntegration* s) { sonar = s; }
-    void begin(); 
+    void begin();
+    void applyHardwarePWM(int16_t left, int16_t right); 
     void updateRamping(); // El "corazón" del movimiento suave
     void update(int16_t currentRampedPWM);
     void applyKinematics(int16_t pwm, int16_t angle);
