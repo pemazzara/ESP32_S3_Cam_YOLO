@@ -1,7 +1,7 @@
 ## 📄 **README.md**
 # 🤖 YOLO Robot - ESP32-S3 Firmware & Control Panel
 
-Robot seguidor de objetos con visión artificial en tiempo real. Usa una **ESP32-S3** con cámara OV2640 para transmitir video por Wi-Fi a un navegador web, donde **YOLOv11n** (ejecutado con ONNX Runtime) detecta personas y envía comandos de navegación por WebSocket. El ESP32 ejecuta un control PID a 50 Hz sobre dos motores con driver L298N, asistido por sensores VL53L0X ToF para frenado de emergencia.
+Robot seguidor de objetos con visión artificial en tiempo real. Usa una **ESP32-S3** (como Master SPI) con cámara OV2640 para transmitir video por Wi-Fi a un navegador web, donde **YOLOv11n** (ejecutado con ONNX Runtime) detecta personas y envía comandos de navegación por WebSocket. El ESP32 SPI Slave ejecuta un control PID a 50 Hz sobre dos motores con driver L298N, asistido por sensores VL53L0X ToF para frenado de emergencia.
 
 Este repositorio contiene el firmware de control y la interfaz web para un robot autónomo. El proyecto combina control de lazo cerrado en tiempo real, procesamiento de sensores, streaming de video y una arquitectura web optimizada para entornos embebidos.
 
@@ -21,17 +21,21 @@ Este repositorio contiene el firmware de control y la interfaz web para un robot
 
 El firmware saca provecho del procesador de doble núcleo del ESP32-S3 mediante FreeRTOS:
 
-* **Core 0 (Comunicaciones y Video):**
+* **Master Core 0 (Comunicaciones y Video):**
     * Servidor HTTP (`WebServer.h`) + Ruta de video `/stream`.
     * Lazo de eventos de `WebSocketsServer`.
     * Gestión de la pila Wi-Fi.
-* **Core 1 (Control y Sensores):**
-    * `navigationTask`: Lectura de sensores de distancia ToF (VL53L0X) y lógica de evasión.
+* **Master Core 1 (Comunicación SPI con Slave):**
+
+* **Slave Core 0 (Comunicación SPI con el Master):**
+    * `tofSensorTask`: Lectura de sensores de distancia ToF (VL53L0X) y lógica de 
+* **Slave Core 1 (Control y Sensores):**
+    * `tofSensorTask`: Lectura de sensores de distancia ToF (VL53L0X) y lógica de evasión.
     * `motorTask`: Ejecución del PID de velocidad cada 20ms e inyección de PWM al puente H.
 
 ---
 
-## 📂 Estructura del Proyecto
+## 📂 Estructura del Proyecto Base
 
 ```text
 src/
@@ -42,8 +46,7 @@ src/
 ├── speed_controller.cpp/h # PID a 50 Hz
 ├── sensor_control.cpp/h         # VL53L0X + HC-SR04                  
 ├── data/
-│   └── index.html.gz       # Frontend monolítico (HTML+CSS+JS) comprimido con GZIP
-│   └── ...                 # Drivers de sensores y cámara
+│   └── index.html       # Frontend monolítico (HTML+CSS+JS)                # Drivers de sensores y cámara
 ├── platformio.ini          # Configuración del entorno de desarrollo y dependencias
 └── README.md
 

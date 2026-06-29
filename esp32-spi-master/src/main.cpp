@@ -31,8 +31,6 @@ TaskHandle_t xNavigationTaskHandle = NULL;
 TaskHandle_t motorTaskHandle = NULL;
 TaskHandle_t httpTaskHandle = NULL;
 
-//QueueHandle_t xStatusQueue;
-//QueueHandle_t xBLECommandQueue;
  
 
 // Definición de las variables (solo UNA vez)
@@ -98,16 +96,13 @@ void speedsToSpeedAngle(int16_t left, int16_t right, int& speed, int& angle);
 
 
 // Instancias globales
-//SensorPayload_t globalSensorData;
+
 static SPIMaster spiMaster; // Vive para siempre en el segmento de datos
 //CalibrationData_t calibrationData;
 //AngleOptimizer angleOptimizer;
 // ==================== WI-FI ====================
 //const char *ssid = "Mi_ssid";
 //const char *password = "Mi_contraseña";
-// ==================== WI-FI REAL ====================
-const char *ssid = "Hervidero";
-const char *password = "lSdS,seemm,slh+gqshielhpdlti";
 
 // ==================== SERVIDORES ====================
 WebServer serverHTTP(80);
@@ -380,24 +375,7 @@ void sendTelemetry() {
         }
     }
 }
-/*
-void sendTelemetry() {
-    if (webSocket.connectedClients() == 0) return;
 
-    uint8_t telemetry[20] = {0};
-    telemetry[0] = 0xBB;
-    telemetry[1] = 0x66;
-    telemetry[2] = 85;  // Batería (simulada)
-    telemetry[3] = targetSpeed.load(std::memory_order_relaxed);
-    spiMaster.getLastResponse(&globalSensorData); 
-    telemetry[4] = mapTo8Bit(globalSensorData.tof_front_mm);   // Distancia frontal
-    telemetry[5] = mapTo8Bit(globalSensorData.tof_left_mm);    // Distancia izquierda
-    telemetry[6] = mapTo8Bit(globalSensorData.tof_right_mm);   // Distancia derecha
-//Serial.printf("📡 Enviando Telemetría: Batería=%d%% Vel=%d ToF F:%dcm L:%dcm R:%dcm\n", 
-    //          telemetry[2], telemetry[3], telemetry[4], telemetry[5], telemetry[6]);
-    webSocket.broadcastBIN(telemetry, sizeof(telemetry));
-}
-*/
 
 bool autonomousMode = false;
 
