@@ -4,78 +4,325 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Control Robot YOLO + Voz</title>
-    <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
     <style>
-        .active { background-color: #3b82f6 !important; border-color: #2563eb !important; color: white !important; }
-        .mic-active { animation: pulse-red 1.5s infinite; }
+        /* Reset y estilos base */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            background-color: #0f172a;
+            color: #e2e8f0;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 1rem;
+            font-family: system-ui, -apple-system, sans-serif;
+        }
+
+        /* Utilidades comunes */
+        .w-full { width: 100%; }
+        .max-w-2xl { max-width: 42rem; }
+        .hidden { display: none; }
+        .flex { display: flex; }
+        .grid { display: grid; }
+        .text-center { text-align: center; }
+        .font-mono { font-family: 'Courier New', monospace; }
+        .font-bold { font-weight: 700; }
+        .truncate { 
+            overflow: hidden; 
+            text-overflow: ellipsis; 
+            white-space: nowrap; 
+        }
+        .object-contain { object-fit: contain; }
+        
+        /* Header y HUD */
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background-color: #1e293b;
+            padding: 1rem;
+            border-radius: 0.75rem;
+            box-shadow: 0 10px 15px -3px rgba(0,0,0,0.3);
+            margin-bottom: 1rem;
+        }
+        
+        .header h1 {
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: #60a5fa;
+        }
+        
+        .hud {
+            display: flex;
+            gap: 1rem;
+            font-size: 0.875rem;
+            font-family: 'Courier New', monospace;
+            background-color: #0f172a;
+            padding: 0.5rem 0.75rem;
+            border-radius: 0.5rem;
+            border: 1px solid #334155;
+        }
+
+        /* Botón de conexión */
+        .connection-area {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+            gap: 1rem;
+        }
+        
+        #btnConnect {
+            width: 33.333%;
+            padding: 0.5rem 1rem;
+            background-color: #059669;
+            border: none;
+            border-radius: 0.5rem;
+            color: white;
+            font-weight: 700;
+            cursor: pointer;
+            transition: background-color 0.15s;
+        }
+        #btnConnect:hover {
+            background-color: #10b981;
+        }
+        
+        #lblStatus {
+            flex: 1;
+            background-color: #1e293b;
+            padding: 0.5rem;
+            border-radius: 0.5rem;
+            text-align: center;
+            font-size: 0.875rem;
+            font-family: 'Courier New', monospace;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        /* Botones de modo */
+        .mode-selector {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+            background-color: #1e293b;
+            padding: 0.5rem;
+            border-radius: 0.75rem;
+        }
+        
+        .mode-btn {
+            flex: 1;
+            padding: 0.5rem;
+            background-color: #334155;
+            border: 1px solid #475569;
+            border-radius: 0.5rem;
+            color: #e2e8f0;
+            font-weight: 700;
+            cursor: pointer;
+            transition: background-color 0.15s, border-color 0.15s;
+        }
+        .mode-btn:hover {
+            background-color: #475569;
+        }
+        .mode-btn.active { 
+            background-color: #3b82f6 !important; 
+            border-color: #2563eb !important; 
+            color: white !important; 
+        }
+
+        /* Panel YOLO */
+        #panelYolo {
+            position: relative;
+            background-color: #000;
+            border-radius: 0.75rem;
+            box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5);
+            border: 2px solid #334155;
+            aspect-ratio: 16/9;
+            /* display: flex;*/
+            /* justify-content: center;*/
+            /* align-items: center;*/
+            margin-bottom: 1.5rem;
+            overflow: hidden;
+        }
+        #panelYolo.hidden {
+            display: none !important;
+        }
+        #canvas { 
+            width: 100%; 
+            height: 100%; 
+            object-fit: contain; 
+        }
+        #fps {
+            position: absolute;
+            top: 0.5rem;
+            right: 0.5rem;
+            background-color: rgba(0,0,0,0.7);
+            padding: 0.25rem 0.5rem;
+            border-radius: 0.25rem;
+            color: #fbbf24;
+            font-family: 'Courier New', monospace;
+            font-size: 0.875rem;
+        }
+
+        /* Panel Voz */
+        #panelVoice {
+            background-color: #1e293b;
+            border-radius: 0.75rem;
+            padding: 2rem;
+            /* display: flex; */
+            /*flex-direction: column;*/
+            /* align-items: center; */
+            /* justify-content: center; */
+            margin-bottom: 1.5rem;
+            border: 2px solid #334155;
+            overflow: hidden;
+        }
+        #panelVoice.hidden {
+            display: none !important;
+        }
+        #micIcon {
+            font-size: 3.75rem;
+            margin-bottom: 1.5rem;
+            background-color: #334155;
+            padding: 1.5rem;
+            border-radius: 50%;
+            transition: all 0.3s;
+        }
+        #panelVoice p {
+            text-align: center;
+            color: #94a3b8;
+            margin-bottom: 1rem;
+        }
+        #panelVoice b {
+            color: #fff;
+        }
+        #voiceLog {
+            width: 100%;
+            background-color: #0f172a;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            font-family: 'Courier New', monospace;
+            text-align: center;
+            color: #60a5fa;
+            min-height: 60px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .mic-active { 
+            animation: pulse-red 1.5s infinite; 
+        }
         @keyframes pulse-red {
             0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
             70% { box-shadow: 0 0 0 15px rgba(239, 68, 68, 0); }
             100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
         }
+
+        /* Panel Manual */
+        #panelManual {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 0.5rem;
+            max-width: 250px;
+            margin-bottom: 2rem;
+        }
+        .ctrl-btn {
+            background-color: #334155;
+            border: none;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            display: flex;
+            justify-content: center;
+            font-size: 1.5rem;
+            cursor: pointer;
+            color: #e2e8f0;
+            transition: background-color 0.15s;
+        }
+        .ctrl-btn:hover {
+            background-color: #475569;
+        }
+        #btnStop {
+            background-color: #dc2626;
+            border: none;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            display: flex;
+            justify-content: center;
+            font-weight: 700;
+            color: white;
+            cursor: pointer;
+            box-shadow: 0 0 15px rgba(220,38,38,0.5);
+            transition: background-color 0.15s;
+        }
+        #btnStop:hover {
+            background-color: #ef4444;
+        }
     </style>
 </head>
-<body class="bg-slate-900 text-slate-100 min-h-screen flex flex-col items-center p-4 font-sans">
-
+<body>
     <!-- Encabezado y Estado -->
-    <div class="w-full max-w-2xl flex justify-between items-center bg-slate-800 p-4 rounded-xl shadow-lg mb-4">
-        <h1 class="text-xl font-bold text-blue-400">🤖 Robot Tracker V2</h1>
-        <div id="hud" class="flex gap-4 text-sm font-mono bg-slate-900 px-3 py-2 rounded-lg border border-slate-700">
-            <span>🔋 --%</span>
-            <span>📏 F:-- L:-- R:-- cm</span>
-            <span>⚡ 0</span>
+    <div class="w-full max-w-2xl header">
+        <h1>🤖 Robot Tracker V2</h1>
+        <div class="hud">
+            <span>🔋 <span id="hudBat">--</span>%</span>
+            <span>📏 F:<span id="hudTofF">--</span> L:<span id="hudTofL">--</span> R:<span id="hudTofR">--</span> cm</span>
+            <span>⚡ <span id="hudSpd">0</span></span>
             <span id="wsStatus">🔴 WS</span>
         </div>
     </div>
 
-    <div class="w-full max-w-2xl flex justify-between items-center mb-4 gap-4">
-        <button id="btnConnect" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-lg font-bold transition-colors w-1/3">
+    <div class="w-full max-w-2xl connection-area">
+        <button id="btnConnect">
             Conectar WS
         </button>
-        <div id="lblStatus" class="flex-1 bg-slate-800 p-2 rounded-lg text-center text-sm font-mono truncate">
+        <div id="lblStatus">
             Esperando conexión...
         </div>
     </div>
 
     <!-- Modos de Control -->
-    <div class="w-full max-w-2xl flex gap-2 mb-4 bg-slate-800 p-2 rounded-xl">
-        <button data-mode="manual" class="mode-btn active flex-1 py-2 bg-slate-700 border border-slate-600 rounded-lg font-bold transition-colors">🎮 Manual</button>
-        <button data-mode="yolo" class="mode-btn flex-1 py-2 bg-slate-700 border border-slate-600 rounded-lg font-bold transition-colors">👁️ YOLO</button>
-        <button data-mode="voice" class="mode-btn flex-1 py-2 bg-slate-700 border border-slate-600 rounded-lg font-bold transition-colors">🎤 Voz</button>
+    <div class="w-full max-w-2xl mode-selector">
+        <button data-mode="manual" class="mode-btn active">🎮 Manual</button>
+        <button data-mode="yolo" class="mode-btn">👁️ YOLO</button>
+        <button data-mode="voice" class="mode-btn">🎤 Voz</button>
     </div>
 
     <!-- CONTENEDOR MODO YOLO -->
-    <div id="panelYolo" class="hidden relative w-full max-w-2xl bg-black rounded-xl overflow-hidden shadow-2xl border-2 border-slate-700 aspect-video flex justify-center items-center mb-6">
+    <div id="panelYolo" class="hidden w-full max-w-2xl">
         <img id="mjpegStream" src="/stream" alt="" class="hidden" crossorigin="anonymous">
-        <canvas id="canvas" class="w-full h-full object-contain"></canvas>
-        <div id="fps" class="absolute top-2 right-2 bg-black/70 px-2 py-1 rounded text-amber-400 font-mono text-sm">FPS: 0</div>
+        <canvas id="canvas"></canvas>
+        <div id="fps">FPS: 0</div>
     </div>
 
     <!-- CONTENEDOR MODO VOZ -->
-    <div id="panelVoice" class="hidden w-full max-w-2xl bg-slate-800 rounded-xl p-8 flex flex-col items-center justify-center mb-6 border-2 border-slate-700">
-        <div id="micIcon" class="text-6xl mb-6 bg-slate-700 p-6 rounded-full transition-all">🎤</div>
-        <p class="text-center text-slate-400 mb-4">Di comandos como:<br><b class="text-white">"Adelante" - "Atrás" - "Izquierda" - "Derecha" - "Para"</b></p>
-        <div id="voiceLog" class="w-full bg-slate-900 p-4 rounded-lg font-mono text-center text-blue-400 min-h-[60px] flex items-center justify-center">
+    <div id="panelVoice" class="hidden w-full max-w-2xl">
+        <div id="micIcon">🎤</div>
+        <p>Di comandos como:<br><b>"Adelante" - "Atrás" - "Izquierda" - "Derecha" - "Para"</b></p>
+        <div id="voiceLog">
             Esperando comando de voz...
         </div>
     </div>
 
     <!-- CONTENEDOR MODO MANUAL -->
-<div id="panelManual" class="grid grid-cols-3 gap-2 w-full max-w-[250px] mb-8">
-    <div></div>
-    <button class="ctrl-btn bg-slate-700 hover:bg-slate-600 p-4 rounded-lg flex justify-center text-2xl" data-angle="90" data-speed="200">⬆️</button>
-    <div></div>
-    
-    <button class="ctrl-btn bg-slate-700 hover:bg-slate-600 p-4 rounded-lg flex justify-center text-2xl" data-angle="180" data-speed="150">⬅️</button>
-    <button id="btnStop" class="bg-red-600 hover:bg-red-500 p-4 rounded-lg flex justify-center font-bold text-white shadow-[0_0_15px_rgba(220,38,38,0.5)]">STOP</button>
-    <button class="ctrl-btn bg-slate-700 hover:bg-slate-600 p-4 rounded-lg flex justify-center text-2xl" data-angle="0" data-speed="150">➡️</button>
-    
-    <div></div>
-    <button class="ctrl-btn bg-slate-700 hover:bg-slate-600 p-4 rounded-lg flex justify-center text-2xl" data-angle="270" data-speed="200">⬇️</button>
-    <div></div>
-</div>
-
+    <div id="panelManual">
+        <div></div>
+        <button class="ctrl-btn" data-angle="90" data-speed="200">⬆️</button>
+        <div></div>
+        
+        <button class="ctrl-btn" data-angle="180" data-speed="150">⬅️</button>
+        <button id="btnStop">STOP</button>
+        <button class="ctrl-btn" data-angle="0" data-speed="150">➡️</button>
+        
+        <div></div>
+        <button class="ctrl-btn" data-angle="270" data-speed="200">⬇️</button>
+        <div></div>
+    </div>
 <script>// ==================== CONFIGURACIÓN ====================
 const WS_URL = `ws://${window.location.hostname}:81`; 
 const INPUT_SIZE = 640;
@@ -90,7 +337,50 @@ const CMD_HEART = 0x02;
 const DISTANCIA_SEGURA = 50;
 const DISTANCIA_PRECAUCION = 150;
 
+    // Cambio de modos
+    const modeButtons = document.querySelectorAll('.mode-btn');
+    const panelManual = document.getElementById('panelManual');
+    const panelYolo = document.getElementById('panelYolo');
+    const panelVoice = document.getElementById('panelVoice');
 
+    // Mostrar panel Manual por defecto
+    panelManual.classList.remove('hidden');
+    panelYolo.classList.add('hidden');
+    panelYolo.classList.remove('flex');
+    panelVoice.classList.add('hidden');
+    panelVoice.classList.remove('flex');
+
+    modeButtons.forEach(button => {
+        button.addEventListener('click', () => {
+            // Quitar clase active de todos los botones
+            modeButtons.forEach(btn => btn.classList.remove('active'));
+            // Agregar clase active al botón clickeado
+            button.classList.add('active');
+            
+            // Ocultar todos los paneles
+            panelManual.classList.add('hidden');
+            panelYolo.classList.add('hidden');
+            panelYolo.classList.remove('flex');
+            panelVoice.classList.add('hidden');
+            panelVoice.classList.remove('flex');
+
+            // Mostrar el panel correspondiente
+            const mode = button.getAttribute('data-mode');
+            switch(mode) {
+                case 'manual':
+                    panelManual.classList.remove('hidden');
+                    break;
+                case 'yolo':
+                    panelYolo.classList.remove('hidden');
+                    panelYolo.classList.add('flex', 'justify-center', 'items-center');
+                    break;
+                case 'voice':
+                    panelVoice.classList.remove('hidden');
+                    panelVoice.classList.add('flex', 'justify-center', 'items-center'); 
+                    break;
+            }
+        });
+    });
 
 // ==================== VARIABLES GLOBALES ====================
 let ws = null;
@@ -229,44 +519,43 @@ function connectWebSocket() {
                 tofFrontal = data[4];
                 tofDerecho = data[5];
                 tofIzquierdo = data[6];
+                console.log(`📡 Datos recibidos - Bat:${bat}% Vel:${spd} F:${tofFrontal} L:${tofIzquierdo} R:${tofDerecho}`);
             }
         };
-        ws.onmessage = (event) => {
-            const data = new Uint8Array(event.data);
-            if (data[0] === 0xBB && data[1] === 0x66) updateHUD(data);
-        };
+
     } catch (e) { lblStatus.innerText = '⚠️ Error iniciando WS.'; }
 }
 
 function updateHUD(data) {
-    const bat = data[2] || 0;
-    const spd = data[3] || 0;
-    
-    tofFrontal = data[4] !== undefined ? data[4] : 255;
-    tofIzquierdo = data[5] !== undefined ? data[5] : 255;
-    tofDerecho = data[6] !== undefined ? data[6] : 255;
-
-    // ==================== ESCUDO DE SEGURIDAD ASÍNCRONO ====================
-    // Si el robot detecta peligro, manda a parar INMEDIATAMENTE sin esperar a YOLO
-    if (tofFrontal < DISTANCIA_SEGURA && tofFrontal > 0) {
-        console.warn(`🛑 FRENO DE EMERGENCIA HUD: Obstáculo detectado a ${tofFrontal}cm. Deteniendo.`);
+        // 1. Leer batería y velocidad
+        const bat = data[2] !== undefined ? data[2] : 0;
+        const spd = data[3] !== undefined ? data[3] : 0;
         
-        // Ejecuta tu función de parada inmediata (ya sea mandando CMD_STOP o velocidad 0)
-        if (typeof stop === "function") {
-            stop(); 
-        } else {
-            sendPacket(CMD_STOP, 127, 127, 90, 0, false); 
+        // 2. Leer sensores ToF (Asegúrate de declararlas localmente con const)
+        const tofFrontal = data[4] !== undefined ? data[4] : 255;
+        const tofIzquierdo = data[5] !== undefined ? data[5] : 255;
+        const tofDerecho = data[6] !== undefined ? data[6] : 255;
+        
+        console.log(`📡 Datos recibidos - Bat:${bat}% Vel:${spd} F:${tofFrontal} L:${tofIzquierdo} R:${tofDerecho}`);
+        
+        // 3. ACTUALIZAR EL HUD SIN DESTRUIR EL HTML
+        document.getElementById('hudBat').textContent = bat;
+        document.getElementById('hudSpd').textContent = spd;
+        document.getElementById('hudTofF').textContent = tofFrontal;
+        document.getElementById('hudTofL').textContent = tofIzquierdo;
+        document.getElementById('hudTofR').textContent = tofDerecho;
+        
+        // Actualizar el estado del WS por separado (solo si cambia)
+        const statusElement = document.getElementById('wsStatus');
+        if (statusElement) {
+            statusElement.textContent = '🟢 WS';
         }
-    }
-    // =======================================================================
-
-    // Renderizado del HUD (Tu código intacto)
-    document.getElementById('hud').innerHTML = `
-        <span>🔋 ${bat}%</span>
-        <span>📏 F:${tofFrontal} L:${tofIzquierdo} R:${tofDerecho} cm</span>
-        <span>⚡ ${spd}</span>
-        ${wsConnected ? '<span class="text-emerald-400">🟢 WS</span>' : '<span class="text-red-400">🔴 WS</span>'}
-    `;
+        
+        // ==================== ESCUDO DE SEGURIDAD ====================
+        if (tofFrontal < DISTANCIA_SEGURA && tofFrontal > 0) {
+            console.warn(`🛑 FRENO DE EMERGENCIA: Obstáculo a ${tofFrontal}cm`);
+            stop();
+        }
 }
 
 // ==================== PAQUETE BINARIO ====================
@@ -780,4 +1069,4 @@ window.addEventListener('beforeunload', () => {
 });
 </script>
 </body>
-</html>
+</html> 

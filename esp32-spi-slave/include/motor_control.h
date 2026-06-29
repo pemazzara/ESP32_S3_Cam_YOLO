@@ -52,13 +52,13 @@ definiciones.*/
 #include "driver/gpio.h"
 #include <math.h>
 
-// Pines L298N en ESP32 S3 Cam
-#define  ENA  48   // PWM motor A izquierdo
-#define  IN1  47   
-#define  IN2  21   
-#define  ENB  2   // PWM motor derecho  
-#define  IN3  41   
-#define  IN4  42
+// Pines L298N - ESP32 S3 WROOM 1 N16R8 - USB OTG
+#define  ENA  15   // PWM motor izquierdo
+#define  IN1  16   
+#define  IN2  17   
+#define  ENB  10   // PWM motor derecho  
+#define  IN3  11   
+#define  IN4  12
 
 // Configuración PWM
 #define MOTOR_PWM_FREQ      1000  // 5 kHz de frecuencia
@@ -73,8 +73,8 @@ definiciones.*/
 #define SAFETY_TIMEOUT_MS   2000  // 2 segundos en vez de 500ms
 //#define HEARTBEAT_TIMEOUT 1000   // 1 segundo
 // Pines asignados
-#define PIN_ENCODER_LEFT  14
-#define PIN_ENCODER_RIGHT 39
+#define PIN_ENCODER_LEFT  8
+#define PIN_ENCODER_RIGHT 18
 #define ENCODER_PPR 20  // Pulsos por revolución de tu encoder
 
 // =========================================================
@@ -150,5 +150,6 @@ public:
     int16_t getTargetLeft() { return targetLeftSpeed; }
     int16_t getTargetRight() { return targetRightSpeed; }
     bool isInitialized() { return ledc_initialized; }
+    bool isEmergency() {return emergencyStopActive;}
 };
 #endif  

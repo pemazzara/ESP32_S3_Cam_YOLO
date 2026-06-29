@@ -1,54 +1,47 @@
 // main.cpp - ESP32 con FreeRTOS
 // https://www.oceanlabz.in/getting-started-with-esp32-s3-wroom-n16r8-cam-dev-board/
 // Para activar microfono en Chrome: chrome://flags/#unsafely-treat-insecure-origin-as-secure
-// chrome://flags/#unsafely-treat-insecure-origin-as-secure
 #include <Arduino.h>
 #include <freertos/FreeRTOS.h>
-#include <freertos/semphr.h>
 #include <freertos/task.h>
 #include <freertos/queue.h>
-#include "sensor_control.h"
-#include "motor_control.h"
-#include "sonar_integration.h"
-#include "speed_controller.h"
+#include "config.h"
+#include "GradientAligner.h"
 #include "esp_task_wdt.h"
+#include <atomic>
 #include <WiFi.h>
 #include <WebServer.h>
 #include <WebSocketsServer.h>
 #include <SPIFFS.h>
-#include <atomic>
-#include <freertos/semphr.h>
 #include "esp_camera.h"
 #include "camera_pins.h"
-#include "index_html_gz.h"  // Auto-generado por compress_html.py
+#include "spi_master.h"
+#include "robot_control.h"
 
-//WebServer server(80);
+#define PIN_ENCODER_LEFT  14
+#define PIN_ENCODER_RIGHT 39
+#define ENCODER_PPR 20  // Pulsos por revolución de tu encoder
 
 
 // Handles globales de FreeRTOS
-// ==================== HANDLES DE TAREAS ====================
+TaskHandle_t xSafetyTaskHandle = NULL;
 TaskHandle_t xSensorRead_Handle = NULL;
-TaskHandle_t sonarTaskHandle = NULL;
+TaskHandle_t xSPITaskHandle = NULL;
+TaskHandle_t xNavigationTaskHandle = NULL;
 TaskHandle_t motorTaskHandle = NULL;
 TaskHandle_t httpTaskHandle = NULL;
 
-// ==================== VARIABLES ATÓMICAS DE CONTROL ====================
-// Para comunicación entre cores
-// Variables de control compartidas (las que ya actualiza tu WebSocket)
+//QueueHandle_t xStatusQueue;
+//QueueHandle_t xBLECommandQueue;
+ 
 
-
-std::atomic<uint32_t> lastCommandTime{0};
-// Variables globales adicionales
-std::atomic<uint32_t> lastValidCommandTime{0};
-std::atomic<uint8_t> lastValidCmdId{0};
-std::atomic<uint16_t> lastValidXCentroid{0};
-std::atomic<uint16_t> lastValidYCentroid{0};
-std::atomic<float> lastValidAngle{0};
-std::atomic<uint8_t> lastValidSpeed{0};
+// Definición de las variables (solo UNA vez)
+std::atomic<uint16_t> targetXCentroid{128};  // Inicializar en centro
+std::atomic<uint16_t> targetYCentroid{128};  // Inicializar en centro
+std::atomic<uint16_t> targetSpeed{0};
 std::atomic<float> targetAngle{90.0f};
-std::atomic<int> targetSpeed{0};
-std::atomic<uint16_t> targetXCentroid{0};  // Nuevo
-std::atomic<uint16_t> targetYCentroid{0};  // Nuevo
+std::atomic<uint32_t> lastCommandTime{0};
+
 // Contadores de pulsos ISR
 std::atomic<uint32_t> pulsesLeft{0};
 std::atomic<uint32_t> pulsesRight{0};
@@ -56,7 +49,6 @@ std::atomic<uint32_t> pulsesRight{0};
 
 // ==================== MUTEX ====================
 SemaphoreHandle_t sensorMutex;
-
 
 // ====================ESP32 ESTRUCTURA DE PAQUETE ====================
 #pragma pack(push, 1)
@@ -72,6 +64,7 @@ struct ControlPacket {
     uint8_t  crc;
 };
 #pragma pack(pop)
+
 
 // CRC-8 con polinomio 0x8C (inverso de 0x31)
 uint8_t crc8(const uint8_t *data, size_t len) {
@@ -91,29 +84,24 @@ uint8_t crc8(const uint8_t *data, size_t len) {
 void setupFreeRTOS();
 void printResetReason();
 // ✅ DECLARAR TODAS LAS TASKS
+void safetyTask(void *pvParameters);
 void tofSensorTask(void *pvParameters);
 void httpTask(void *pvParameters);
-void motorTask(void *pvParameters);
-// ==================== PROTOTIPOS DE FUNCIONES ISR ====================
-void IRAM_ATTR isrLeft()  { 
-    pulsesLeft.fetch_add(1, std::memory_order_relaxed); 
-}
-void IRAM_ATTR isrRight() { 
-    pulsesRight.fetch_add(1, std::memory_order_relaxed); 
-}
+void spiMasterTask(void *pvParameters);
+void navigationTask(void *pvParameters);
 
 
-void checkJTAGPins();
+void sendTelemetry();
+void sendStatusUpdate();
+//void checkJTAGPins();
 void speedsToSpeedAngle(int16_t left, int16_t right, int& speed, int& angle);
 
 
 // Instancias globales
-MotorControl motorController;
-SensorControl sensors;
-SpeedController speedController;
-SensorData_t globalSensorData;
-
-
+//SensorPayload_t globalSensorData;
+static SPIMaster spiMaster; // Vive para siempre en el segmento de datos
+//CalibrationData_t calibrationData;
+//AngleOptimizer angleOptimizer;
 // ==================== WI-FI ====================
 //const char *ssid = "Mi_ssid";
 //const char *password = "Mi_contraseña";
@@ -124,19 +112,6 @@ const char *password = "lSdS,seemm,slh+gqshielhpdlti";
 // ==================== SERVIDORES ====================
 WebServer serverHTTP(80);
 WebSocketsServer webSocket(81); // Puerto 81 para WebSocket
-
-void setupEncoders() {
-    pinMode(PIN_ENCODER_LEFT, INPUT_PULLUP);  // Usa pullup interno
-    pinMode(PIN_ENCODER_RIGHT, INPUT_PULLUP);
-    
-    attachInterrupt(digitalPinToInterrupt(PIN_ENCODER_LEFT), isrLeft, RISING);
-    attachInterrupt(digitalPinToInterrupt(PIN_ENCODER_RIGHT), isrRight, RISING);
-    
-    Serial.println("✅ Encoders configurados en pines 19 y 20");
-}
-
-
-
 void setupCamera() {
     // Configuración de la cámara OV2640
     camera_config_t config;
@@ -266,6 +241,8 @@ void onWebSocketEvent(uint8_t num, WStype_t type, uint8_t *payload, size_t lengt
         case WStype_CONNECTED:
             Serial.printf("[%u] Cliente WebSocket conectado\n", num);
             lastCommandTime.store(millis(), std::memory_order_release);
+            // Enviar telemetría inmediatamente al conectar
+            sendTelemetry();
             break;
 
         case WStype_DISCONNECTED:
@@ -273,50 +250,72 @@ void onWebSocketEvent(uint8_t num, WStype_t type, uint8_t *payload, size_t lengt
             lastCommandTime.store(0, std::memory_order_release);
             break;
 
-    case WStype_BIN:
-    if (length == 12 && payload[0] == 0xAA && payload[1] == 0x55) {
-        uint8_t calcCrc = crc8(payload + 2, 9);
-        if (calcCrc == payload[11]) {
-            ControlPacket* pkt = (ControlPacket*)payload;
-            
-            // Siempre actualizar timestamp para evitar failsafe
-            lastCommandTime.store(millis(), std::memory_order_release);
-            
-            // Según el comando, actuar de forma diferente
-            switch (pkt->cmdId) {
-                case 0x00: // STOP
-                    targetSpeed.store(0, std::memory_order_release);
-                    Serial.printf("📥 WS STOP: Velocidad forzada a 0\n");
-                    break;
+        case WStype_BIN:
+            if (length == 12 && payload[0] == 0xAA && payload[1] == 0x55) {
+                uint8_t calcCrc = crc8(payload + 2, 9);
+                if (calcCrc == payload[11]) {
+                    ControlPacket* pkt = (ControlPacket*)payload;
                     
-                case 0x01: // DRIVE
-                    targetAngle.store(pkt->angle / 10.0f, std::memory_order_relaxed);
-                    targetSpeed.store(pkt->speed, std::memory_order_relaxed);
-                    Serial.printf("📥 WS DRIVE: Ang=%.1f° Vel=%d\n", pkt->angle / 10.0f, pkt->speed);
-                    break;
+                    // Siempre actualizar timestamp para evitar failsafe
+                    lastCommandTime.store(millis(), std::memory_order_release);
                     
-                case 0x02: // HEARTBEAT
-                    // Solo actualizar timestamp, no modificar velocidad ni ángulo
-                    // El log se imprime cada 5 segundos para no saturar
-                    static uint32_t lastHeartbeatLog = 0;
-                    if (millis() - lastHeartbeatLog > 5000) {
-                        Serial.println("💓 Heartbeat recibido");
-                        lastHeartbeatLog = millis();
+                    switch (pkt->cmdId) {
+                        case 0x00: // STOP
+                            targetSpeed.store(0, std::memory_order_release);
+                            targetAngle.store(90.0f, std::memory_order_release);
+                            Serial.println("📥 WS STOP");
+                            break;
+                            
+                        case 0x01: // DRIVE
+                            {
+                                float angle = pkt->angle / 10.0f;
+                                uint16_t speed = pkt->speed;
+                                uint16_t xCent = pkt->xCentroid;
+                                uint16_t yCent = pkt->yCentroid;
+                                
+                                targetAngle.store(angle, std::memory_order_release);
+                                // Mapear 0-255 → 0-1023 para PWM 10 bits
+                                targetSpeed.store((uint16_t)(speed * 4), std::memory_order_release);
+                                targetXCentroid.store(xCent, std::memory_order_release);
+                                targetYCentroid.store(yCent, std::memory_order_release);
+                                
+                                Serial.printf("📥 WS DRIVE: Ang=%.1f° Vel=%d Centro=(%d,%d)\n", 
+                                            angle, speed, xCent, yCent);
+                            }
+                            break;
+                            
+                        case 0x02: // HEARTBEAT
+                            {
+                                static uint32_t lastHeartbeatLog = 0;
+                                if (millis() - lastHeartbeatLog > 5000) {
+                                    Serial.println("💓 Heartbeat recibido");
+                                    lastHeartbeatLog = millis();
+                                }
+                            }
+                            break;
+
+                        case 0x03: // RESET EMERGENCY ← NUEVO
+                            Serial.println("📥 WS RESET EMERGENCY");
+                            // Enviar comando SPI para resetear emergency
+                            spiMaster.sendResetEmergency();
+                            break;
+                            
+                        case 0x04: // RESET ODOMETRY ← NUEVO
+                            Serial.println("📥 WS RESET ODOMETRY");
+                            spiMaster.sendResetOdometry();
+                            break;
+
+                        default:
+                            Serial.printf("⚠️ Comando desconocido: 0x%02X\n", pkt->cmdId);
+                            break;
                     }
-                    break;
-                    
-                default:
-                    Serial.printf("⚠️ Comando desconocido: 0x%02X\n", pkt->cmdId);
-                    break;
+                } else {
+                    Serial.printf("❌ CRC error: calc=0x%02X recv=0x%02X\n", calcCrc, payload[11]);
+                }
+            } else {
+                Serial.printf("⚠️ Paquete inválido: %d bytes\n", length);
             }
-        } else {
-            Serial.printf("❌ CRC error: calc=0x%02X recv=0x%02X\n", calcCrc, payload[11]);
-        }
-    } else {
-        Serial.printf("⚠️ Paquete inválido: %d bytes\n", length);
-    }
-    break;
-    
+            break;
     }
 }
 
@@ -339,7 +338,49 @@ uint8_t mapTo8Bit(uint16_t distance_mm) {
     return distance_tx;    
 }
 // ==================== ENVIAR TELEMETRÍA POR WEBSOCKET ====================
+// Ver version anterior
+void sendTelemetry() {
+    if (webSocket.connectedClients() == 0) return;
 
+    SensorPayload_t sensorData;
+    
+    if (spiMaster.getLastResponse(&sensorData)) {
+        uint8_t telemetry[20] = {0};
+        telemetry[0] = 0xBB;
+        telemetry[1] = 0x66;
+        
+        // Batería (simulada o real)
+        telemetry[2] = sensorData.battery_mv > 0 ? 
+                       map(sensorData.battery_mv, 3300, 4200, 0, 100) : 85;
+        
+        // Velocidad actual
+        telemetry[3] = targetSpeed.load(std::memory_order_relaxed) / 4;  // 0-1020 → 0-255
+        
+        // Distancias TOF (convertir mm a cm, limitar a 255)
+        telemetry[4] = min(255, sensorData.tof_front_mm / 10);
+        telemetry[5] = min(255, sensorData.tof_left_mm / 10);
+        telemetry[6] = min(255, sensorData.tof_right_mm / 10);
+        
+        // Estado del sistema
+        telemetry[7] = sensorData.system_flags;  // Bit0: emergency, Bit1: failsafe
+        
+        // Obstáculos (datos adicionales)
+        telemetry[8] = sensorData.obstacle_count;
+        telemetry[9] = sensorData.obstacle_dist[0] / 10;  // Primer obstáculo en cm
+        
+        webSocket.broadcastBIN(telemetry, sizeof(telemetry));
+        
+        // Debug periódico
+        static uint32_t lastTelemetryDebug = 0;
+        if (millis() - lastTelemetryDebug > 2000) {
+            Serial.printf("📡 Telemetría: Bat=%d%% Vel=%d ToF F:%d L:%d R:%d cm Obst=%d Flags=0x%02X\n", 
+                         telemetry[2], telemetry[3], telemetry[4], 
+                         telemetry[5], telemetry[6], telemetry[8], telemetry[7]);
+            lastTelemetryDebug = millis();
+        }
+    }
+}
+/*
 void sendTelemetry() {
     if (webSocket.connectedClients() == 0) return;
 
@@ -348,195 +389,46 @@ void sendTelemetry() {
     telemetry[1] = 0x66;
     telemetry[2] = 85;  // Batería (simulada)
     telemetry[3] = targetSpeed.load(std::memory_order_relaxed);
-
-    telemetry[4] = mapTo8Bit(globalSensorData.tofFront);   // Distancia frontal
-    telemetry[5] = mapTo8Bit(globalSensorData.tofLeft);    // Distancia izquierda
-    telemetry[6] = mapTo8Bit(globalSensorData.tofRight);   // Distancia derecha
+    spiMaster.getLastResponse(&globalSensorData); 
+    telemetry[4] = mapTo8Bit(globalSensorData.tof_front_mm);   // Distancia frontal
+    telemetry[5] = mapTo8Bit(globalSensorData.tof_left_mm);    // Distancia izquierda
+    telemetry[6] = mapTo8Bit(globalSensorData.tof_right_mm);   // Distancia derecha
 //Serial.printf("📡 Enviando Telemetría: Batería=%d%% Vel=%d ToF F:%dcm L:%dcm R:%dcm\n", 
     //          telemetry[2], telemetry[3], telemetry[4], telemetry[5], telemetry[6]);
     webSocket.broadcastBIN(telemetry, sizeof(telemetry));
 }
-
-
-// Para el control de velocidad, vamos a implementar un controlador PID incremental 
-// que también incorpore corrección angular basada en el seguimiento visual del centroide. 
-// Esto permitirá que el robot no solo mantenga la velocidad deseada, sino que 
-// también corrija su trayectoria para seguir al objetivo detectado por la cámara.
-/*
-void motorTask(void *pvParameters) {
-    TickType_t xLastWakeTime = xTaskGetTickCount();
-    const TickType_t xFrequency = pdMS_TO_TICKS(20); // 50 Hz estricto
-    float lastPWM = 0;
-    
-    // Variables para debug no bloqueante
-    uint32_t lastDebugTime = 0;
-    uint32_t lastControlDebugTime = 0;
-
-    for (;;) {
-        vTaskDelayUntil(&xLastWakeTime, xFrequency);
-        
-        uint32_t ahora = millis();
-        uint32_t tUltimoCmd = lastValidCommandTime.load(std::memory_order_acquire);
-        
-        // FAILSAFE: 1 segundo sin comandos -> parar
-        if (ahora - tUltimoCmd > 1000) {
-            if (lastPWM != 0) {
-                Serial.println("⚠️ FAILSAFE: Timeout, deteniendo motores");
-                speedController.setTarget(90.0f, 0, 0, 0);
-                speedController.updateControl(); // Esto apaga motores y resetea integrales
-                lastPWM = 0;
-            }
-        } else {
-            // Leer valores actuales de los targets
-            float angulo = targetAngle.load(std::memory_order_acquire);
-            int velocidad = targetSpeed.load(std::memory_order_acquire);
-            uint16_t xCent = targetXCentroid.load(std::memory_order_acquire);
-            uint16_t yCent = targetYCentroid.load(std::memory_order_acquire);
-            
-            // Convertir velocidad (0-255) a PWM (0-1023)
-            float pwm_target = (velocidad / 255.0f) * 1023.0f;
-            
-            // Aplicar zona muerta para evitar vibraciones a bajas velocidades
-            if (velocidad < 5) {
-                pwm_target = 0;
-            }
-            
-            // Actualizar controlador de velocidad
-            speedController.setTarget(angulo, pwm_target, xCent, yCent);
-            speedController.updateControl(); // 🛞 ¡Acá ocurre la magia bilateral!
-            lastPWM = pwm_target;
-            
-            // DEBUG: Mostrar información de control cada 1 segundo
-            if (ahora - lastControlDebugTime > 1000) {
-                Serial.printf("📊 Control: Ang=%.1f° Vel=%d PWM_Base=%.0f Centro=(%d,%d)\n", 
-                              angulo, velocidad, pwm_target, xCent, yCent);
-                
-                // También mostrar el estado actual del controlador
-                speedController.printDebug();
-                lastControlDebugTime = ahora;
-            }
-        }
-        
-        // DEBUG adicional: Mostrar pulsos de encoder cada 2 segundos
-        if (ahora - lastDebugTime > 2000) {
-            uint32_t pLeft = pulsesLeft.load(std::memory_order_acquire);
-            uint32_t pRight = pulsesRight.load(std::memory_order_acquire);
-            Serial.printf("🔧 Pulsos encoder (crudos): L=%d R=%d\n", pLeft, pRight);
-            lastDebugTime = ahora;
-        }
-    }
-}
 */
 
-void motorTask(void *pvParameters) {
-    TickType_t xLastWakeTime = xTaskGetTickCount();
-    const TickType_t xFrequency = pdMS_TO_TICKS(20); // 50 Hz estricto
-    float lastPWM = 0;
-
-    for (;;) {
-        vTaskDelayUntil(&xLastWakeTime, xFrequency);
-        
-        uint32_t ahora = millis();
-        uint32_t tUltimoCmd = lastCommandTime.load(std::memory_order_acquire);
-        
-        if (ahora - tUltimoCmd > 1000) {
-            if (lastPWM != 0) {
-                Serial.println("⚠️ FAILSAFE: Timeout, deteniendo");
-                speedController.setTarget(90.0f, 0, 0, 0);
-                speedController.updateControl(); // Esto va a apagar motores y resetear integrales
-                lastPWM = 0;
-            }
-        } else {
-            float angulo = targetAngle.load(std::memory_order_acquire);
-            int velocidad = targetSpeed.load(std::memory_order_acquire);
-            uint16_t xCent = targetXCentroid.load(std::memory_order_acquire);
-            uint16_t yCent = targetYCentroid.load(std::memory_order_acquire);
-            
-            float pwm_target = (velocidad / 255.0f) * 1023.0f;
-            
-            speedController.setTarget(angulo, pwm_target, xCent, yCent);
-            speedController.updateControl(); // 🛞 ¡Acá ocurre la magia bilateral!
-            lastPWM = pwm_target;
-        }
-    }
-}
+bool autonomousMode = false;
 
 // ✅ SETUP FREERTOS SIMPLIFICADO
 void setupFreeRTOS() {
-    Serial.println("🔧 Inicializando FreeRTOS..."); 
-    // Tareas FreeRTOS
+    Serial.println("🔧 Inicializando FreeRTOS...");
+    
+    // Crear tasks
     // Tasks en Core 0 (Aislada para radio)
     xTaskCreatePinnedToCore(
-        httpTask, 
-        "HTTP_Task", 
-        4096, NULL, 
-        1, 
-        &httpTaskHandle, 
-        0);
-
+    httpTask, 
+    "HTTP_Task", 
+    4096, NULL, 
+    1, 
+    &httpTaskHandle, 
+    0);
     // Tasks en Core 1 (Ordenadas por prioridad real)
-    // Crear la tarea de control de bajo nivel a 20Hz (cada 50ms)
-    // Serial.println("   Creando task MotorControl...");       
+    Serial.println("   Creando task SPI...");
     xTaskCreatePinnedToCore(
-        motorTask,
-        "MotorControl",
-        4096,
-        NULL,
-        2,
-        &motorTaskHandle,   // Handle
-        1   // Core 1
-    );
-    // Tarea TOF SENSORS alta prioridad, mucho stack
-    Serial.println("   Creando task tofSensorRead...");
-    xTaskCreatePinnedToCore(
-        tofSensorTask,     // Función
-        "SensorRead",        // Nombre
-        8192,               // ← AUMENTA ESTE VALOR (ej: 8192 o 16384)
-        NULL,               // Parámetros
-        3, //configMAX_PRIORITIES - 2,
-        &xSensorRead_Handle,
-        0
+        spiMasterTask,
+        "SPI_Master", 
+        8192,  // ✅ Aumentar stack para SPI
+        &spiMaster,   // ✅ Sin parámetros complejos
+        3,  // Prioridad alta para SPI
+        &xSPITaskHandle,
+        1
     );
 
     Serial.println("✅ FreeRTOS inicializado");
     Serial.println("   - Core 1: MotorControl (Prioridad Alta)");
-    Serial.println("   - Core 0: HTTP Server (Prioridad Media)");   
-}
-
-
-
-uint16_t fuseFrontalDistances(SensorData_t &data) {
-    uint8_t confidence = 0;
-    uint16_t final_dist = 0;
-
-    // 1. Validar rangos individuales (filtros de salud)
-    bool sonar_valid = (data.sonarDistance > 20 && data.sonarDistance < 4000);
-    bool tof_valid = (data.tofFront > 20 && data.tofFront < 2000);
-
-    // 2. Lógica de decisión
-    if (sonar_valid && tof_valid) {
-        int16_t diff = abs((int16_t)data.sonarDistance - (int16_t)data.tofFront);
-        
-        if (diff < 150) { // Si coinciden razonablemente (15cm)
-            final_dist = (data.sonarDistance + data.tofFront) / 2; // Fusión promedio
-            confidence |= 0x18; // Bits de fuente: 11 (Fused)
-        } else {
-            // Discrepancia: El objeto es raro (quizás un cristal o una rejilla)
-            // Regla de oro: Ante la duda, confía en la distancia MÁS CORTA (Seguridad)
-            final_dist = min(data.sonarDistance, data.tofFront);
-            confidence |= 0x04; // Bit de discrepancia
-            confidence |= (data.sonarDistance < data.tofFront) ? 0x08 : 0x10; 
-        }
-    } else if (tof_valid) {
-        final_dist = data.tofFront;
-        confidence |= 0x10; // Fuente: TOF
-    } else if (sonar_valid) {
-        final_dist = data.sonarDistance;
-        confidence |= 0x08; // Fuente: Sonar
-    }
-
-    data.sensorStatus = confidence; // Guardamos el veredicto
-    return final_dist;
+    Serial.println("   - Core 0: Ble (Baja prioridad)");
 }
 
 
@@ -557,6 +449,7 @@ void httpTask(void *pvParameters) {
         vTaskDelay(pdMS_TO_TICKS(5));
     }
 }
+
 
 void speedsToSpeedAngle(int16_t left, int16_t right, int& speed, int& angle) {
     // 1. Si ambos son cero, es STOP
@@ -619,25 +512,68 @@ void speedsToSpeedAngle(int16_t left, int16_t right, int& speed, int& angle) {
     angle = (angle + 360) % 360;
 }
 
-
-// Task ESPECÍFICA para sensores (alta frecuencia)
-void tofSensorTask(void *pvParameters) {
-    while(1) {
-
-        sensors.readAll(); // Lee TOFs locales
-        if (xSemaphoreTake(sensorMutex, pdMS_TO_TICKS(5)) == pdTRUE) {
-            globalSensorData.tofFront = sensors.frontDistance;
-            globalSensorData.tofLeft = sensors.leftDistance;
-            globalSensorData.tofRight = sensors.rightDistance;            // ... actualizar resto de TOFs ...
-            globalSensorData.lastTofUpdate = millis();
-            xSemaphoreGive(sensorMutex);
+void spiMasterTask(void *pvParameters) {
+    SPIMaster* spiMasterPtr = (SPIMaster*)pvParameters;
+    
+    TickType_t xLastWakeTime = xTaskGetTickCount();
+    const TickType_t xFrequency = pdMS_TO_TICKS(20); // 50 Hz
+    uint16_t lastPWM = 0;
+    
+    for (;;) {
+        vTaskDelayUntil(&xLastWakeTime, xFrequency);
+        
+        uint32_t ahora = millis();
+        uint32_t tUltimoCmd = lastCommandTime.load(std::memory_order_acquire);
+        
+        if (ahora - tUltimoCmd > 1000) {
+            // FAILSAFE: timeout sin comandos
+            if (lastPWM != 0) {
+                Serial.println("⚠️ FAILSAFE: Timeout, enviando STOP");
+                spiMasterPtr->sendStopCommand();
+                lastPWM = 0;
+                // Resetear centroides al parar
+                targetXCentroid.store(128, std::memory_order_release);
+                targetYCentroid.store(128, std::memory_order_release);
+            } else {
+                // Enviar heartbeat esporádico
+                static uint32_t lastHeartbeat = 0;
+                if (ahora - lastHeartbeat > 500) {
+                    spiMasterPtr->sendHeartbeat();
+                    lastHeartbeat = ahora;
+                }
+            }
+        } else {
+            // Comando activo: leer valores atómicos una sola vez
+            float angulo = targetAngle.load(std::memory_order_acquire);
+            uint16_t velocidad = targetSpeed.load(std::memory_order_acquire);
+            
+            // Enviar comando con los centroides actuales
+            spiMasterPtr->sendDriveCommand((int)velocidad, angulo, false);
+            
+            lastPWM = velocidad;
+            
+            // Debug periódico
+            static uint32_t lastDebug = 0;
+            if (ahora - lastDebug > 1000) {
+                SensorPayload_t data; 
+                spiMasterPtr->getLastResponse(&data);
+                Serial.printf("📡 Slave: (%.2f,%.2f) θ=%.1f° Obst=%d\n",
+                             data.pos_x_m, data.pos_y_m,
+                             data.theta_rad * 180.0f / PI,
+                             data.obstacle_count);
+                
+                if (data.obstacle_count > 0) {
+                    for (int i = 0; i < data.obstacle_count && i < 3; i++) {
+                        Serial.printf("   🚧 Obst %d: %dmm @ %d° (sensor %d)\n",
+                                     i, data.obstacle_dist[i], 
+                                     data.obstacle_angle[i], data.obstacle_sensor[i]);
+                    }
+                }
+                lastDebug = ahora;
+            }
         }
-         
-        //evaluarEmergenciaInmediata(globalSensorData);
-        vTaskDelay(pdMS_TO_TICKS(20));
-    }  // Tarea crítica: Lectura del sensor
+    }
 }
-
 
 
 void printResetReason() {
@@ -657,8 +593,44 @@ void printResetReason() {
         default: Serial.println("Unknown"); break;
     }
 }
+
+// En setup() tanto del Master como del Slave:
+void printStructInfo() {
+    Serial.println("=== SENSOR PAYLOAD LAYOUT ===");
+    Serial.printf("sizeof(SensorPayload_t): %d bytes\n", sizeof(SensorPayload_t));
+    Serial.printf("  pos_x_m:        offset=%d size=%d\n", offsetof(SensorPayload_t, pos_x_m), sizeof(float));
+    Serial.printf("  pos_y_m:        offset=%d size=%d\n", offsetof(SensorPayload_t, pos_y_m), sizeof(float));
+    Serial.printf("  theta_rad:      offset=%d size=%d\n", offsetof(SensorPayload_t, theta_rad), sizeof(float));
+    Serial.printf("  linear_vel:     offset=%d size=%d\n", offsetof(SensorPayload_t, linear_vel_m_s), sizeof(float));
+    Serial.printf("  angular_vel:    offset=%d size=%d\n", offsetof(SensorPayload_t, angular_vel_rad_s), sizeof(float));
+    Serial.printf("  odom_timestamp: offset=%d size=%d\n", offsetof(SensorPayload_t, odom_timestamp), sizeof(uint32_t));
+    Serial.printf("  obstacle_count: offset=%d size=%d\n", offsetof(SensorPayload_t, obstacle_count), sizeof(uint8_t));
+    Serial.printf("  obstacle_dist:  offset=%d size=%d\n", offsetof(SensorPayload_t, obstacle_dist), sizeof(uint16_t)*3);
+    Serial.printf("  obstacle_angle: offset=%d size=%d\n", offsetof(SensorPayload_t, obstacle_angle), sizeof(int16_t)*3);
+    Serial.printf("  obstacle_sensor:offset=%d size=%d\n", offsetof(SensorPayload_t, obstacle_sensor), sizeof(uint8_t)*3);
+    Serial.printf("  tof_front_mm:   offset=%d size=%d\n", offsetof(SensorPayload_t, tof_front_mm), sizeof(uint16_t));
+    Serial.printf("  tof_left_mm:    offset=%d size=%d\n", offsetof(SensorPayload_t, tof_left_mm), sizeof(uint16_t));
+    Serial.printf("  tof_right_mm:   offset=%d size=%d\n", offsetof(SensorPayload_t, tof_right_mm), sizeof(uint16_t));
+    Serial.printf("  encoder_left:   offset=%d size=%d\n", offsetof(SensorPayload_t, encoder_left_cnt), sizeof(uint32_t));
+    Serial.printf("  encoder_right:  offset=%d size=%d\n", offsetof(SensorPayload_t, encoder_right_cnt), sizeof(uint32_t));
+    Serial.printf("  system_flags:   offset=%d size=%d\n", offsetof(SensorPayload_t, system_flags), sizeof(uint8_t));
+    Serial.printf("  battery_mv:     offset=%d size=%d\n", offsetof(SensorPayload_t, battery_mv), sizeof(uint16_t));
+    Serial.printf("  sensor_timestamp:offset=%d size=%d\n", offsetof(SensorPayload_t, sensor_timestamp), sizeof(uint32_t));
+    Serial.println("==============================");
+}
+
+// 🏁 SETUP - Inicialización
 void setup() {
     Serial.begin(115200);
+    delay(1000);
+    
+    printResetReason();
+    printStructInfo();
+    // Inicializar SPI Master ANTES de crear tareas
+    if (!spiMaster.begin()) {
+        Serial.println("❌ Error fatal: SPI Master no inicializado");
+        while(1) { delay(1000); }
+    }
     // Cámara
     setupCamera();
     // 2. INICIALIZAR SPIFFS (¡CRÍTICO! Debe ir antes del servidor)
@@ -668,7 +640,7 @@ void setup() {
     } else {
         Serial.println("📂 SPIFFS montado con éxito.");
     }
-
+    
     sensorMutex = xSemaphoreCreateMutex();   
     // Wi-Fi
     WiFi.begin(ssid, password);
@@ -696,69 +668,17 @@ void setup() {
     // WebSocket
     webSocket.begin();
     webSocket.onEvent(  onWebSocketEvent);
-    
-
-    
-    sensors.begin();// Sensores ToF  
-    motorController.begin();
-    speedController.begin();
+     
      
     setupFreeRTOS();
 
-    //setupEncoders();
 
     Serial.println("✅ Sistema listo:");
     Serial.println("   Web: http://" + WiFi.localIP().toString());
     Serial.println("   Stream: http://" + WiFi.localIP().toString() + "/stream");
     Serial.println("   WS: ws://" + WiFi.localIP().toString() + ":81");
 }
-/*
-void setup() {
-    Serial.begin(115200);
 
-    // Hardware
-    setupCamera();
-    sensors.begin();
-    motorController.begin();
-    speedController.begin();
-    sensorMutex = xSemaphoreCreateMutex();
-
-    // WiFi
-    WiFi.begin(ssid, password);
-    Serial.print("🌐 Conectando a Wi-Fi");
-    while (WiFi.status() != WL_CONNECTED) {
-        delay(500);
-        Serial.print(".");
-    }
-    Serial.println("\n✅ Wi-Fi Conectado: " + WiFi.localIP().toString());
-    
-    // PSRAM
-    Serial.printf("📊 PSRAM libre: %d bytes\n", ESP.getFreePsram());
-    if (ESP.getFreePsram() < 2000000) {
-        Serial.println("⚠️ PSRAM baja, reiniciando...");
-        delay(1000);
-        ESP.restart();
-    }
-    
-    // Rutas HTTP
-    server.on("/", HTTP_GET, []() {
-        server.sendHeader("Content-Encoding", "gzip");
-        server.sendHeader("Content-Type", "text/html; charset=utf-8");
-        server.send_P(200, "text/html", (const char*)index_html_gz, index_html_gz_len);
-    });
-    
-    server.on("/stream", HTTP_GET, handleMjpeg);
-    
-    server.begin();      
-    webSocket.begin();
-    webSocket.onEvent(onWebSocketEvent);   
-    setupFreeRTOS();
-
-    setupEncoders();
-    Serial.println("\n🤖 === SISTEMA YOLO ROBOT LISTO ===");
-    Serial.println("   Web Panel: http://" + WiFi.localIP().toString());
-    Serial.println("   Video Stream: http://" + WiFi.localIP().toString() + "/stream");
-}*/
 // 🔁 LOOP principal (en Core 1) - Puede usarse para tareas de baja prioridad
 void loop() {
     // Mantiene vivo el servidor de WebSockets

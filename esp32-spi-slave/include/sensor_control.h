@@ -6,17 +6,17 @@
 
 #define NUM_SENSORES 3
 // Pines XSHUT
-#define FRONT_XSHUT_PIN  38 
-#define LEFT_XSHUT_PIN   40
-#define RIGHT_XSHUT_PIN  1 
+#define FRONT_XSHUT_PIN  4 
+#define LEFT_XSHUT_PIN   5
+#define RIGHT_XSHUT_PIN  6 
 
 #define SENSOR_FRONT 0
 #define SENSOR_LEFT  1 
 #define SENSOR_RIGHT 2
 
 // Pines I2C y sensores VL53L0X
-#define I2C_TOF_SDA 4
-#define I2C_TOF_SCL 5
+#define I2C_TOF_SDA 1
+#define I2C_TOF_SCL 2
 
 // Dirección por defecto (todos los sensores usan la misma)
 #define DEFAULT_ADDRESS  0x29
@@ -24,19 +24,6 @@
 #define FRONT_ADDRESS    0x20
 #define LEFT_ADDRESS     0x21  
 #define RIGHT_ADDRESS    0x22
-
-typedef struct {
-    uint16_t sonarDistance;
-    uint16_t a_vel;  // velocidad de acercamiento (adimen) positivo si se aleja, negativo si se acerca
-    uint16_t tofLeft;
-    uint16_t tofFront;  
-    uint16_t tofRight;   
-    uint32_t lastSonarUpdate;
-    uint32_t lastTofUpdate; 
-    uint32_t timestamp; // Última actualización de cualquier sensor   
-    bool emergency;
-    uint8_t sensorStatus;       // Bit 0: Sonar OK, Bit 1: TOFs OK
-} SensorData_t;
 
 class SensorControl {
 public:

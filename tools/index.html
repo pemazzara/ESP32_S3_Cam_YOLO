@@ -6,6 +6,7 @@
     <title>Control Robot YOLO + Voz</title>
     <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
     <style>
+        /* Reset y estilos base */
         * {
             margin: 0;
             padding: 0;
@@ -23,14 +24,23 @@
             font-family: system-ui, -apple-system, sans-serif;
         }
 
+        /* Utilidades comunes */
         .w-full { width: 100%; }
         .max-w-2xl { max-width: 42rem; }
-        .hidden { display: none !important; }
+        .hidden { display: none; }
         .flex { display: flex; }
-        .justify-center { justify-content: center; }
-        .items-center { align-items: center; }
+        .grid { display: grid; }
         .text-center { text-align: center; }
+        .font-mono { font-family: 'Courier New', monospace; }
+        .font-bold { font-weight: 700; }
+        .truncate { 
+            overflow: hidden; 
+            text-overflow: ellipsis; 
+            white-space: nowrap; 
+        }
+        .object-contain { object-fit: contain; }
         
+        /* Header y HUD */
         .header {
             display: flex;
             justify-content: space-between;
@@ -40,8 +50,6 @@
             border-radius: 0.75rem;
             box-shadow: 0 10px 15px -3px rgba(0,0,0,0.3);
             margin-bottom: 1rem;
-            flex-wrap: wrap;
-            gap: 0.5rem;
         }
         
         .header h1 {
@@ -59,9 +67,9 @@
             padding: 0.5rem 0.75rem;
             border-radius: 0.5rem;
             border: 1px solid #334155;
-            flex-wrap: wrap;
         }
 
+        /* Botón de conexión */
         .connection-area {
             display: flex;
             justify-content: space-between;
@@ -81,7 +89,9 @@
             cursor: pointer;
             transition: background-color 0.15s;
         }
-        #btnConnect:hover { background-color: #10b981; }
+        #btnConnect:hover {
+            background-color: #10b981;
+        }
         
         #lblStatus {
             flex: 1;
@@ -96,6 +106,7 @@
             white-space: nowrap;
         }
 
+        /* Botones de modo */
         .mode-selector {
             display: flex;
             gap: 0.5rem;
@@ -114,32 +125,36 @@
             color: #e2e8f0;
             font-weight: 700;
             cursor: pointer;
-            transition: background-color 0.15s;
+            transition: background-color 0.15s, border-color 0.15s;
         }
-        .mode-btn:hover { background-color: #475569; }
+        .mode-btn:hover {
+            background-color: #475569;
+        }
         .mode-btn.active { 
             background-color: #3b82f6 !important; 
             border-color: #2563eb !important; 
             color: white !important; 
         }
 
+        /* Panel YOLO */
         #panelYolo {
             position: relative;
             background-color: #000;
             border-radius: 0.75rem;
+            overflow: hidden;
             box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5);
             border: 2px solid #334155;
             aspect-ratio: 16/9;
+            display: flex;
+            justify-content: center;
+            align-items: center;
             margin-bottom: 1.5rem;
-            overflow: hidden;
         }
-        
         #canvas { 
             width: 100%; 
             height: 100%; 
             object-fit: contain; 
         }
-        
         #fps {
             position: absolute;
             top: 0.5rem;
@@ -150,17 +165,20 @@
             color: #fbbf24;
             font-family: 'Courier New', monospace;
             font-size: 0.875rem;
-            z-index: 10;
         }
 
+        /* Panel Voz */
         #panelVoice {
             background-color: #1e293b;
             border-radius: 0.75rem;
             padding: 2rem;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
             margin-bottom: 1.5rem;
             border: 2px solid #334155;
         }
-        
         #micIcon {
             font-size: 3.75rem;
             margin-bottom: 1.5rem;
@@ -169,13 +187,14 @@
             border-radius: 50%;
             transition: all 0.3s;
         }
-        
         #panelVoice p {
             text-align: center;
             color: #94a3b8;
             margin-bottom: 1rem;
         }
-        
+        #panelVoice b {
+            color: #fff;
+        }
         #voiceLog {
             width: 100%;
             background-color: #0f172a;
@@ -189,17 +208,16 @@
             align-items: center;
             justify-content: center;
         }
-        
         .mic-active { 
             animation: pulse-red 1.5s infinite; 
         }
-        
         @keyframes pulse-red {
             0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
             70% { box-shadow: 0 0 0 15px rgba(239, 68, 68, 0); }
             100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
         }
 
+        /* Panel Manual */
         #panelManual {
             display: grid;
             grid-template-columns: repeat(3, 1fr);
@@ -207,7 +225,6 @@
             max-width: 250px;
             margin-bottom: 2rem;
         }
-        
         .ctrl-btn {
             background-color: #334155;
             border: none;
@@ -220,8 +237,9 @@
             color: #e2e8f0;
             transition: background-color 0.15s;
         }
-        .ctrl-btn:hover { background-color: #475569; }
-        
+        .ctrl-btn:hover {
+            background-color: #475569;
+        }
         #btnStop {
             background-color: #dc2626;
             border: none;
@@ -235,7 +253,9 @@
             box-shadow: 0 0 15px rgba(220,38,38,0.5);
             transition: background-color 0.15s;
         }
-        #btnStop:hover { background-color: #ef4444; }
+        #btnStop:hover {
+            background-color: #ef4444;
+        }
     </style>
 </head>
 <body>
@@ -249,17 +269,14 @@
             <span id="wsStatus">🔴 WS</span>
         </div>
     </div>
-    <div class="w-full max-w-2xl" style="display:flex; gap:0.5rem; margin-bottom:1rem;">
-            <button id="btnResetEmergency" style="flex:1; padding:0.5rem; background:#f59e0b; border:none; border-radius:0.5rem; color:white; font-weight:bold; cursor:pointer;">
-        🔄 Reset Emergency
-            </button>
-            <button id="btnResetOdometry" style="flex:1; padding:0.5rem; background:#8b5cf6; border:none; border-radius:0.5rem; color:white; font-weight:bold; cursor:pointer;">
-        📍      Reset Odometry
-            </button>
-    </div>
+
     <div class="w-full max-w-2xl connection-area">
-        <button id="btnConnect">Conectar WS</button>
-        <div id="lblStatus">Esperando conexión...</div>
+        <button id="btnConnect">
+            Conectar WS
+        </button>
+        <div id="lblStatus">
+            Esperando conexión...
+        </div>
     </div>
 
     <!-- Modos de Control -->
@@ -271,16 +288,18 @@
 
     <!-- CONTENEDOR MODO YOLO -->
     <div id="panelYolo" class="hidden w-full max-w-2xl">
-        <img id="mjpegStream" src="/stream" alt="" style="display:none;" crossorigin="anonymous">
+        <img id="mjpegStream" src="/stream" alt="" class="hidden" crossorigin="anonymous">
         <canvas id="canvas"></canvas>
         <div id="fps">FPS: 0</div>
     </div>
 
     <!-- CONTENEDOR MODO VOZ -->
     <div id="panelVoice" class="hidden w-full max-w-2xl">
-        <div id="micIcon" style="text-align:center;">🎤</div>
+        <div id="micIcon">🎤</div>
         <p>Di comandos como:<br><b>"Adelante" - "Atrás" - "Izquierda" - "Derecha" - "Para"</b></p>
-        <div id="voiceLog">Esperando comando de voz...</div>
+        <div id="voiceLog">
+            Esperando comando de voz...
+        </div>
     </div>
 
     <!-- CONTENEDOR MODO MANUAL -->
@@ -297,9 +316,7 @@
         <button class="ctrl-btn" data-angle="270" data-speed="200">⬇️</button>
         <div></div>
     </div>
-
-<script>
-// ==================== CONFIGURACIÓN ====================
+<script>// ==================== CONFIGURACIÓN ====================
 const WS_URL = `ws://${window.location.hostname}:81`; 
 const INPUT_SIZE = 640;
 const CONF_THRESHOLD = 0.25;
@@ -309,16 +326,48 @@ const CLASS_TARGET = 0;
 const CMD_STOP  = 0x00;
 const CMD_DRIVE = 0x01;
 const CMD_HEART = 0x02;
-const CMD_RESET_EMERGENCY = 0x03;  // ← NUEVO
-const CMD_RESET_ODOMETRY  = 0x04;  // ← NUEVO
-const CMD_REQUEST_TELEMETRY = 0x05; // ← NUEVO (opcional)
-
 
 const DISTANCIA_SEGURA = 50;
 const DISTANCIA_PRECAUCION = 150;
-// Variables para evitar STOP innecesarios
-let lastDriveCommandTime = 0;
-const DRIVE_COMMAND_TIMEOUT = 500; // ms - mantener último comando DRIVE por 500ms
+
+    // Cambio de modos
+    const modeButtons = document.querySelectorAll('.mode-btn');
+    const panelManual = document.getElementById('panelManual');
+    const panelYolo = document.getElementById('panelYolo');
+    const panelVoice = document.getElementById('panelVoice');
+
+    // Mostrar panel Manual por defecto
+    panelManual.classList.remove('hidden');
+    panelYolo.classList.add('hidden');
+    panelVoice.classList.add('hidden');
+
+    modeButtons.forEach(button => {
+        button.addEventListener('click', () => {
+            // Quitar clase active de todos los botones
+            modeButtons.forEach(btn => btn.classList.remove('active'));
+            // Agregar clase active al botón clickeado
+            button.classList.add('active');
+            
+            // Ocultar todos los paneles
+            panelManual.classList.add('hidden');
+            panelYolo.classList.add('hidden');
+            panelVoice.classList.add('hidden');
+            
+            // Mostrar el panel correspondiente
+            const mode = button.getAttribute('data-mode');
+            switch(mode) {
+                case 'manual':
+                    panelManual.classList.remove('hidden');
+                    break;
+                case 'yolo':
+                    panelYolo.classList.remove('hidden');
+                    break;
+                case 'voice':
+                    panelVoice.classList.remove('hidden');
+                    break;
+            }
+        });
+    });
 
 // ==================== VARIABLES GLOBALES ====================
 let ws = null;
@@ -332,105 +381,67 @@ let animationFrameId = null;
 let manualInterval = null;
 let heartbeatInterval = null;
 let voiceRecognition = null;
-
+// ==================== VARIABLES DE SENSORES (Añadir al inicio) ====================
 // Variables globales para sensores ToF
-let tofFrontal = 255;
+let tofFrontal = 255;  // cm (255 = sin obstáculo)
 let tofIzquierdo = 255;
 let tofDerecho = 255;
 
-// Elementos del DOM
+// Capturamos el div de FPS correctamente
+const fps = document.getElementById('fps'); 
+
 const imgStream = document.getElementById('mjpegStream');
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
 const lblStatus = document.getElementById('lblStatus');
 const wsStatus = document.getElementById('wsStatus');
-const fpsDisplay = document.getElementById('fps');
-const voiceLog = document.getElementById('voiceLog');
-const micIcon = document.getElementById('micIcon');
+const resizeCanvas = document.createElement('canvas');
+resizeCanvas.width = INPUT_SIZE;
+resizeCanvas.height = INPUT_SIZE;
+const resizeCtx = resizeCanvas.getContext('2d');
+const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+let isListening = false; // Bandera de control
+recognition.continuous = true;
+recognition.lang = 'es-ES';
 
-// Canvas auxiliar para preprocesamiento
-const offscreenCanvas = document.createElement('canvas');
-const offscreenCtx = offscreenCanvas.getContext('2d', { willReadFrequently: true });
-
-// Panel references
-const panelManual = document.getElementById('panelManual');
-const panelYolo = document.getElementById('panelYolo');
-const panelVoice = document.getElementById('panelVoice');
-
-// ==================== CAMBIO DE MODOS ====================
+// ==================== GESTIÓN DE MODOS ====================
 document.querySelectorAll('.mode-btn').forEach(btn => {
     btn.addEventListener('click', () => {
-        // Actualizar botones activos
         document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
-        
-        const newMode = btn.dataset.mode;
-        
-        // Si ya estamos en ese modo, no hacer nada
-        if (currentMode === newMode) return;
-        
-        // Detener modo anterior
-        stopPreviousMode();
-        
-        // Cambiar al nuevo modo
-        currentMode = newMode;
+        currentMode = btn.dataset.mode;
         
         // Mostrar/Ocultar Paneles
-        panelManual.classList.add('hidden');
-        panelYolo.classList.add('hidden');
-        panelVoice.classList.add('hidden');
-        
-        switch(currentMode) {
-            case 'manual':
-                panelManual.classList.remove('hidden');
-                lblStatus.innerText = '✅ Modo: MANUAL';
-                break;
-            case 'yolo':
-                panelYolo.classList.remove('hidden');
-                lblStatus.innerText = '📹 Modo: YOLO - Iniciando...';
-                initYOLO();
-                break;
-            case 'voice':
-                panelVoice.classList.remove('hidden');
-                lblStatus.innerText = '🎤 Modo: VOZ';
-                startVoiceRecognition();
-                break;
-        }
+        document.getElementById('panelManual').classList.toggle('hidden', currentMode !== 'manual');
+        document.getElementById('panelYolo').classList.toggle('hidden', currentMode !== 'yolo');
+        document.getElementById('panelVoice').classList.toggle('hidden', currentMode !== 'voice');
         
         stop(); // Detener robot al cambiar de modo
+        
+        if (currentMode === 'yolo' && !session) initYOLO();
+        
+        if (currentMode === 'voice') startVoiceRecognition();
+        else stopVoiceRecognition();
+
+        //if (currentMode === 'manual') handleManualControl(event);
+
+
+        lblStatus.innerText = `✅ Modo: ${currentMode.toUpperCase()}`;
     });
 });
-
-function stopPreviousMode() {
-    // Detener bucle YOLO si está activo
-    if (animationFrameId) {
-        cancelAnimationFrame(animationFrameId);
-        animationFrameId = null;
-    }
-    isProcessing = false;
-    
-    // Detener reconocimiento de voz
-    if (currentMode === 'voice') {
-        stopVoiceRecognition();
-    }
-    
-    // Limpiar intervalos manuales
-    clearInterval(manualInterval);
-    manualInterval = null;
-}
-
+// 1. Vincular todos los botones de dirección (.ctrl-btn)
 // ==================== CONTROLES MANUALES ====================
 document.querySelectorAll('.ctrl-btn').forEach(btn => {
     if (btn.id === 'btnStop') return;
-    
     btn.addEventListener('pointerdown', (e) => {
         e.preventDefault();
         if (currentMode !== 'manual') return;
         const angle = parseInt(btn.dataset.angle);
         const speed = parseInt(btn.dataset.speed);
-        drive(angle, speed, false);
+        const reverse = btn.dataset.reverse === 'true';
+        drive(angle, speed, reverse);
         clearInterval(manualInterval);
-        manualInterval = setInterval(() => drive(angle, speed, false), 100);
+        manualInterval = setInterval(() => drive(angle, speed, reverse), 100);
     });
     
     btn.addEventListener('pointerup', (e) => {
@@ -445,30 +456,21 @@ document.querySelectorAll('.ctrl-btn').forEach(btn => {
     });
 });
 
-document.getElementById('btnResetEmergency').addEventListener('click', () => {
-    sendPacket(CMD_RESET_EMERGENCY, 128, 128, 90, 0, false);
-    console.log('🔄 Enviado comando RESET EMERGENCY');
-});
-
-document.getElementById('btnResetOdometry').addEventListener('click', () => {
-    sendPacket(CMD_RESET_ODOMETRY, 128, 128, 90, 0, false);
-    console.log('📍 Enviado comando RESET ODOMETRY');
-});
-
+// 2. Vincular el botón de STOP de forma explícita (por su ID único)
+// Listener específico para STOP (sin interferencias)
 document.getElementById('btnStop').addEventListener('click', (e) => {
     e.preventDefault();
     clearInterval(manualInterval);
     stop();
 });
 
-// ==================== WEBSOCKET ====================
+
+
+// ==================== WEBSOCKET (Core Logic) ====================
 document.getElementById('btnConnect').addEventListener('click', () => {
-    if (ws && wsConnected) {
-        ws.close();
-    } else {
-        connectWebSocket();
-    }
+    if (ws && wsConnected) ws.close(); else connectWebSocket();
 });
+
 
 function connectWebSocket() {
     lblStatus.innerText = '🔗 Conectando WebSocket...';
@@ -480,14 +482,12 @@ function connectWebSocket() {
             wsConnected = true;
             wsStatus.innerHTML = '🟢 WS';
             lblStatus.innerText = `✅ Conectado - Modo ${currentMode.toUpperCase()}`;
-            
-            // Iniciar heartbeat
             if (heartbeatInterval) clearInterval(heartbeatInterval);
             heartbeatInterval = setInterval(() => {
-                if (wsConnected) {
+                if (wsConnected && (currentMode === 'manual' || !isProcessing)) {
                     sendPacket(CMD_HEART, 128, 128, 90, 0, false);
                 }
-            }, 2000);
+            }, 2000);        
         };
         
         ws.onclose = () => {
@@ -495,59 +495,54 @@ function connectWebSocket() {
             wsStatus.innerHTML = '🔴 WS';
             lblStatus.innerText = '❌ Desconectado. Reconectando...';
             if (heartbeatInterval) clearInterval(heartbeatInterval);
-            setTimeout(connectWebSocket, 3000);
+            setTimeout(connectWebSocket, 1500);
         };
-        
-        ws.onerror = (error) => {
-            console.error('WebSocket error:', error);
-            lblStatus.innerText = '⚠️ Error de conexión WS';
-        };
-        
         ws.onmessage = (event) => {
             const data = new Uint8Array(event.data);
             if (data[0] === 0xBB && data[1] === 0x66) {
                 updateHUD(data);
+                // Supongamos que mandas los ToF en los bytes 4, 5 y 6 del paquete
+                // Ver si va aca o en updateHUD, dependiendo de si quieres que se actualicen en el HUD o solo en las variables
+                tofFrontal = data[4];
+                tofDerecho = data[5];
+                tofIzquierdo = data[6];
+                console.log(`📡 Datos recibidos - Bat:${bat}% Vel:${spd} F:${tofFrontal} L:${tofIzquierdo} R:${tofDerecho}`);
             }
         };
-    } catch (e) {
-        lblStatus.innerText = '⚠️ Error iniciando WS.';
-        console.error('WS connection error:', e);
-    }
+
+    } catch (e) { lblStatus.innerText = '⚠️ Error iniciando WS.'; }
 }
 
 function updateHUD(data) {
-    const bat = data[2] || 0;
-    const spd = data[3] || 0;
-    tofFrontal = data[4] || 255;
-    tofDerecho = data[5] || 255;
-    tofIzquierdo = data[6] || 255;
-    
-    document.getElementById('hudBat').textContent = bat;
-    document.getElementById('hudSpd').textContent = spd;
-    document.getElementById('hudTofF').textContent = tofFrontal;
-    document.getElementById('hudTofL').textContent = tofIzquierdo;
-    document.getElementById('hudTofR').textContent = tofDerecho;
-    
-    wsStatus.textContent = '🟢 WS';
-        // Actualizar estado del sistema
-    const wsStatusEl = document.getElementById('wsStatus');
-    if (systemFlags & 0x01) {
-        wsStatusEl.textContent = '🔴 EMERGENCY';
-        wsStatusEl.style.color = '#ff0000';
-    } else if (systemFlags & 0x02) {
-        wsStatusEl.textContent = '🟡 FAILSAFE';
-        wsStatusEl.style.color = '#ffaa00';
-    } else {
-        wsStatusEl.textContent = '🟢 WS';
-        wsStatusEl.style.color = '';
-    }
-    
-    // ESCUDO DE SEGURIDAD
-    if (tofFrontal < DISTANCIA_SEGURA && tofFrontal > 0) {
-        console.warn(`🛑 FRENO DE EMERGENCIA: Obstáculo a ${tofFrontal}cm`);
-        stop();
-        clearInterval(manualInterval);
-    }
+        // 1. Leer batería y velocidad
+        const bat = data[2] !== undefined ? data[2] : 0;
+        const spd = data[3] !== undefined ? data[3] : 0;
+        
+        // 2. Leer sensores ToF (Asegúrate de declararlas localmente con const)
+        const tofFrontal = data[4] !== undefined ? data[4] : 255;
+        const tofIzquierdo = data[5] !== undefined ? data[5] : 255;
+        const tofDerecho = data[6] !== undefined ? data[6] : 255;
+        
+        console.log(`📡 Datos recibidos - Bat:${bat}% Vel:${spd} F:${tofFrontal} L:${tofIzquierdo} R:${tofDerecho}`);
+        
+        // 3. ACTUALIZAR EL HUD SIN DESTRUIR EL HTML
+        document.getElementById('hudBat').textContent = bat;
+        document.getElementById('hudSpd').textContent = spd;
+        document.getElementById('hudTofF').textContent = tofFrontal;
+        document.getElementById('hudTofL').textContent = tofIzquierdo;
+        document.getElementById('hudTofR').textContent = tofDerecho;
+        
+        // Actualizar el estado del WS por separado (solo si cambia)
+        const statusElement = document.getElementById('wsStatus');
+        if (statusElement) {
+            statusElement.textContent = '🟢 WS';
+        }
+        
+        // ==================== ESCUDO DE SEGURIDAD ====================
+        if (tofFrontal < DISTANCIA_SEGURA && tofFrontal > 0) {
+            console.warn(`🛑 FRENO DE EMERGENCIA: Obstáculo a ${tofFrontal}cm`);
+            stop();
+        }
 }
 
 // ==================== PAQUETE BINARIO ====================
@@ -581,26 +576,63 @@ function crc8(data) {
     }
     return crc;
 }
-
 function sendPacket(cmdId, xCent, yCent, angleDeg, speed, reverse) {
     if (!ws || !wsConnected) return;
+    // Para debug: mostrar qué se envía
+    if (cmdId === CMD_DRIVE && speed > 0) {
+        console.log(`📤 Enviando: cmd=${cmdId} centro=(${xCent},${yCent}) ang=${angleDeg} vel=${speed}`);
+    }
     const packet = buildPacket(cmdId, xCent, yCent, angleDeg, speed, reverse);
     ws.send(packet.buffer);
 }
 
-function drive(angle, speed, reverse = false) {
-    sendPacket(CMD_DRIVE, 128, 128, angle, speed, reverse);
+function drive(angle, speed, reverse = false) { sendPacket(CMD_DRIVE, 128, 128, angle, speed, reverse); }
+function stop() { sendPacket(CMD_STOP, 128, 128, 90, 0, false); }
+
+// ==================== MODO VOZ (Speech API) ====================
+
+
+// Función segura para arrancar
+function startVoiceControl() {
+    if (isListening) return; // Si ya está escuchando, no hagas nada
+    
+    try {
+        recognition.start();
+    } catch (e) {
+        console.error("Error al intentar iniciar text-to-speech:", e);
+    }
 }
 
-function stop() {
-    sendPacket(CMD_STOP, 128, 128, 90, 0, false);
-}
+recognition.onstart = () => {
+    isListening = true;
+    console.log("🎤 Reconocimiento de voz activo...");
+};
 
-// ==================== MODO VOZ ====================
+recognition.onerror = (event) => {
+    console.error(`❌ Error de voz: ${event.error}`);
+    
+    // Si el navegador te rechaza el micrófono, DETÉN el bucle de reinicios
+    if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+        console.warn("⚠️ Permiso denegado o contexto inseguro. Deteniendo reinicios.");
+        isListening = false;
+    }
+};
+
+recognition.onend = () => {
+    isListening = false;
+    console.log("🤫 El reconocimiento de voz se detuvo.");
+    
+    // Solo reiniciar si no fue un error fatal de permisos
+    // Ponemos un pequeño delay para que al motor le dé tiempo de limpiarse
+    if (modoVozActivo) { 
+        setTimeout(() => startVoiceControl(), 300);
+    }
+};
+
 function startVoiceRecognition() {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) {
-        voiceLog.innerHTML = "⚠️ Tu navegador no soporta reconocimiento de voz. Usa Chrome.";
+        document.getElementById('voiceLog').innerHTML = "⚠️ Tu navegador no soporta reconocimiento de voz. Usa Chrome.";
         return;
     }
 
@@ -611,255 +643,221 @@ function startVoiceRecognition() {
         voiceRecognition.interimResults = false;
 
         voiceRecognition.onstart = () => {
-            micIcon.classList.add('mic-active');
-            voiceLog.innerText = "Escuchando... (Di 'Adelante', 'Atrás', 'Para'...)";
+            document.getElementById('micIcon').classList.add('mic-active', 'bg-red-900');
+            document.getElementById('voiceLog').innerText = "Escuchando... (Di 'Adelante', 'Atrás', 'Para'...)";
         };
 
         voiceRecognition.onresult = (event) => {
             if (currentMode !== 'voice') return;
+            // Tomar la última frase dicha
             const lastResultIndex = event.results.length - 1;
             const command = event.results[lastResultIndex][0].transcript.toLowerCase().trim();
-            voiceLog.innerHTML = `🎙️ Comando detectado:<br><b>"${command}"</b>`;
+            document.getElementById('voiceLog').innerHTML = `🎙️ Comando detectado:<br><b>"${command}"</b>`;
+            
             processVoiceCommand(command);
         };
 
         voiceRecognition.onerror = (event) => {
             console.error("Error de voz:", event.error);
-            micIcon.classList.remove('mic-active');
-            if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
-                voiceLog.innerText = "⚠️ Permiso de micrófono denegado";
-            }
+            document.getElementById('micIcon').classList.remove('mic-active', 'bg-red-900');
+            if(currentMode === 'voice') setTimeout(() => voiceRecognition.start(), 1000);
         };
 
         voiceRecognition.onend = () => {
-            micIcon.classList.remove('mic-active');
-            if (currentMode === 'voice') {
-                setTimeout(() => {
-                    try { voiceRecognition.start(); } catch(e) {}
-                }, 500);
-            }
+            document.getElementById('micIcon').classList.remove('mic-active', 'bg-red-900');
+            // Reiniciar automáticamente si seguimos en modo voz
+            if (currentMode === 'voice') voiceRecognition.start();
         };
     }
     
-    try {
-        if (currentMode === 'voice') {
-            voiceRecognition.start();
-        }
-    } catch(e) {
-        // Ya está escuchando
-    }
+    try { voiceRecognition.start(); } catch(e) {} // Evitar error si ya está corriendo
 }
 
 function stopVoiceRecognition() {
     if (voiceRecognition) {
-        try {
-            voiceRecognition.stop();
-        } catch(e) {}
-        micIcon.classList.remove('mic-active');
-        voiceLog.innerText = "Reconocimiento de voz detenido";
+        voiceRecognition.stop();
+        document.getElementById('micIcon').classList.remove('mic-active', 'bg-red-900');
     }
 }
 
 function processVoiceCommand(comandoVoice) {
+    console.log(`🗣️ Procesando comando en firmware: "${comandoVoice}"`);
+
+    // Diccionario nativo para tu protocolo binario del ESP32 (Ángulos x10)
     const comandos = {
-        'adelante':  { angle: 90,  speed: 200 },
-        'avanza':    { angle: 90,  speed: 200 },
-        'atrás':     { angle: 270, speed: 200 },
-        'retrocede': { angle: 270, speed: 200 },
-        'izquierda': { angle: 180, speed: 150 },
-        'derecha':   { angle: 0,   speed: 150 },
-        'para':      { angle: 90,  speed: 0 },
-        'detente':   { angle: 90,  speed: 0 },
-        'stop':      { angle: 90,  speed: 0 }
+        'adelante':  { angle: 90,  speed: 200, cmd: CMD_DRIVE },
+        'avanza':    { angle: 90,  speed: 200, cmd: CMD_DRIVE },
+        
+        'atrás':     { angle: 270, speed: 200, cmd: CMD_DRIVE },
+        'retrocede': { angle: 270, speed: 200, cmd: CMD_DRIVE },
+        
+        'izquierda': { angle: 180, speed: 150, cmd: CMD_DRIVE },
+        
+        'derecha':   { angle: 0,    speed: 150, cmd: CMD_DRIVE },
+        
+        'para':      { angle: 90,   speed: 0,   cmd: CMD_STOP },
+        'detente':   { angle: 90,   speed: 0,   cmd: CMD_STOP },
+        'stop':      { angle: 90,   speed: 0,   cmd: CMD_STOP }
     };
 
+    // Buscar si la frase contiene alguna palabra clave del diccionario
     let match = null;
     for (const clave in comandos) {
         if (comandoVoice.includes(clave)) {
             match = comandos[clave];
-            break;
+            break; 
         }
     }
 
+    // Si no coincide con nada, salimos
     if (!match) {
-        voiceLog.innerText = `❓ Comando no reconocido: "${comandoVoice}"`;
+        console.log(`❓ Comando de voz no reconocido: "${comandoVoice}"`);
         return;
     }
 
-    // ESCUDO DE SEGURIDAD DIRECCIONAL
-    if (match.speed > 0) {
+    // ================= ESCUDO DE SEGURIDAD DIRECCIONAL =================
+    if (match.cmd === CMD_DRIVE && match.speed > 0) {
+        
+        // 1. Si va hacia adelante (90°), revisar sensor frontal
         if (match.angle === 90 && tofFrontal < DISTANCIA_SEGURA) {
-            console.warn("🛡️ Bloqueo: Obstáculo adelante");
-            stop();
+            console.warn("🛡️ Bloqueo por voz: Obstáculo adelante. Comando denegado.");
+            sendPacket(CMD_STOP, 127, 127, 90, 0); 
             return;
         }
+        
+        // 2. Si va a la izquierda (180°), revisar sensor izquierdo
         if (match.angle === 180 && tofIzquierdo < DISTANCIA_SEGURA) {
-            console.warn("🛡️ Bloqueo: Obstáculo a la izquierda");
-            stop();
+            console.warn("🛡️ Bloqueo por voz: Obstáculo a la izquierda. Comando denegado.");
+            sendPacket(CMD_STOP, 127, 127, 180, 0);
             return;
         }
-        if (match.angle === 0 && tofDerecho < DISTANCIA_SEGURA) {
-            console.warn("🛡️ Bloqueo: Obstáculo a la derecha");
-            stop();
-            return;
-        }
-    }
 
-    if (match.speed === 0) {
-        stop();
-    } else {
-        drive(match.angle, match.speed);
-        // Auto-stop después de 1 segundo para comandos de voz
-        setTimeout(() => {
-            if (currentMode === 'voice') stop();
-        }, 1000);
+        // 3. Si va a la derecha (0°), revisar sensor derecho
+        if (match.angle === 0 && tofDerecho < DISTANCIA_SEGURA) {
+            console.warn("🛡️ Bloqueo por voz: Obstáculo a la derecha. Comando denegado.");
+            sendPacket(CMD_STOP, 127, 127, 0, 0);
+            return;
+        }
     }
+    // ===================================================================
+
+    // Si la dirección está limpia o es un comando de parada, enviamos el paquete binario
+    console.log(`🚀 Enviando al ESP32 -> Cmd: ${match.cmd}, Ang: ${match.angle}, Vel: ${match.speed}`);
+    
+    // Removido el parámetro 'reverse' para ajustarse al contrato de tu firmware
+    sendPacket(match.cmd, 127, 127, match.angle, match.speed);
 }
 
-// ==================== YOLO ====================
+
+
+// ==================== YOLO (Oculto en resumen) ====================
+// (Aquí iría todo el código de YOLO11n que ya revisamos anteriormente)
 async function initYOLO() {
-    if (session) {
-        startYOLOLoop();
-        return;
-    }
-    
-    lblStatus.innerText = '⏳ Cargando modelo YOLO11n...';
+    lblStatus.innerText = '⏳ Cargando YOLO11n...';
     try {
-        session = await ort.InferenceSession.create(
-            'https://pemazzara.github.io/robot-models/yolo11n.onnx',
-            { executionProviders: ['wasm'] }
-        );
-        lblStatus.innerText = '📹 YOLO listo - Modo seguimiento activo';
-        startYOLOLoop();
-    } catch (e) {
-        console.error('Error cargando YOLO:', e);
-        lblStatus.innerText = '❌ Error cargando modelo ONNX';
-        currentMode = 'manual';
-        document.querySelector('[data-mode="manual"]').click();
-    }
+        session = await ort.InferenceSession.create('https://pemazzara.github.io/robot-models/yolo11n.onnx', { executionProviders: ['wasm'] });
+        lblStatus.innerText = '📹 YOLO listo.';
+        startYOLOLoop(); // (Lógica de YOLO abreviada por legibilidad)
+    } catch (e) { lblStatus.innerText = '❌ Error ONNX.'; }
 }
 
 function startYOLOLoop() {
-    if (animationFrameId) {
-        cancelAnimationFrame(animationFrameId);
-    }
     lastFpsTime = performance.now();
     fpsCounter = 0;
-    isProcessing = false;
     processFrame();
 }
 
 async function processFrame() {
-    // Solo procesar si estamos en modo YOLO
     if (currentMode !== 'yolo') {
-        animationFrameId = null;
+        animationFrameId = requestAnimationFrame(processFrame);
         return;
     }
     
-    // Verificar si la imagen del stream está disponible
     if (!isProcessing && imgStream.complete && imgStream.naturalWidth > 0) {
         isProcessing = true;
         
-        const fw = imgStream.naturalWidth;
-        const fh = imgStream.naturalHeight;
+        const fw = imgStream.naturalWidth || 320;
+        const fh = imgStream.naturalHeight || 240;
+        canvas.width = fw;
+        canvas.height = fh;
+
+        // --- SOLUCIÓN DE INVERSIÓN VERTICAL EN CANVAS ---
+        ctx.save();
+        ctx.translate(0, fh);
+        ctx.scale(1, -1); // Invierte verticalmente el renderizado para dejarlo al derecho
+        ctx.drawImage(imgStream, 0, 0, fw, fh);
+        ctx.restore();
         
         try {
-            // Actualizar dimensiones del canvas si es necesario
-            if (canvas.width !== fw || canvas.height !== fh) {
-                canvas.width = fw;
-                canvas.height = fh;
-                offscreenCanvas.width = fw;
-                offscreenCanvas.height = fh;
+            // El canvas ya tiene la imagen al derecho; lo enviamos a procesar
+            const inputTensor = preprocessImage(canvas);
+            const outputMap = await session.run({ images: inputTensor });
+            const detections = processOutput(outputMap, fw, fh);                         
+            console.log(`🔍 Detecciones totales: ${detections.length}`);
+            // Mostrar clases detectadas
+            detections.forEach(d => {
+            console.log(`   Clase ${d.class}: ${(d.confidence*100).toFixed(1)}% (${d.w.toFixed(0)}x${d.h.toFixed(0)})`);
+            });
+            
+            // Dibujamos las cajas sobre el canvas que ya está derecho
+            drawDetections(detections);
+            
+            const target = selectTarget(detections);
+            if (target) {
+                sendDrivingCommand(target, fw, fh);
+            } else {
+                stop(); 
             }
-            
-            // Dibujar frame actual
-            ctx.drawImage(imgStream, 0, 0, fw, fh);
-            offscreenCtx.drawImage(imgStream, 0, 0, fw, fh);
-            
-            // Ejecutar inferencia YOLO
-            if (session) {
-                const inputTensor = preprocessImage(offscreenCanvas);
-                const outputMap = await session.run({ images: inputTensor });
-                const detections = processOutput(outputMap, fw, fh);
-                
-                // Dibujar detecciones
-                drawDetections(detections);
-                
-                // Control del robot basado en detecciones
-                const target = selectTarget(detections);
-                const now = performance.now();  // ← SOLO UNA DECLARACIÓN
-
-                if (target) {
-                    sendDrivingCommand(target, fw, fh);
-                    lastDriveCommandTime = now;  // ← ACTUALIZAR TIMESTAMP
-                } else if (now - lastDriveCommandTime > DRIVE_COMMAND_TIMEOUT) {
-                    // Solo enviar STOP si ha pasado suficiente tiempo desde el último DRIVE
-                    stop();
-                    console.log('🛑 STOP: Sin detección por >500ms');
-                }
-                // Si no ha pasado el timeout, mantener el último comando DRIVE
-            }
-            
-            // Actualizar FPS (usar el mismo 'now' declarado arriba)
-            fpsCounter++;
-            const fpsNow = performance.now();  // ← RENOMBRAR PARA EVITAR CONFLICTO
-            if (fpsNow - lastFpsTime >= 1000) {
-                fpsDisplay.innerText = `FPS: ${fpsCounter}`;
-                fpsCounter = 0;
-                lastFpsTime = fpsNow;
-            }
-            
         } catch (e) {
-            console.error("⚠️ Error en YOLO:", e);
-        } finally {
-            isProcessing = false;  // ← SOLO EN FINALLY
+            // Dejamos de ser silenciosos para poder diagnosticar en la consola (F12)
+            console.error("⚠️ Error en ejecución de YOLO:", e);
+            lblStatus.innerText = '⚠️ Error de inferencia: ' + e.message;
         }
+        
+        fpsCounter++;
+        const now = performance.now();
+        if (now - lastFpsTime >= 1000) {
+            fps.innerText = `FPS: ${fpsCounter}`;
+            fpsCounter = 0;
+            lastFpsTime = now;
+        }
+        
+        isProcessing = false;
     }
     
-    // Programar siguiente frame solo si seguimos en modo YOLO
-    if (currentMode === 'yolo') {
-        animationFrameId = requestAnimationFrame(processFrame);
-    } else {
-        animationFrameId = null;
-    }
+    animationFrameId = requestAnimationFrame(processFrame);
 }
 
 function preprocessImage(sourceCanvas) {
-    const targetSize = INPUT_SIZE;
+    // 1. Redimensionar al tamaño exacto de entrada del modelo (640x640)
+    //    Usamos el canvas global reutilizable (evita Garbage Collection)
+    resizeCtx.drawImage(sourceCanvas, 0, 0, INPUT_SIZE, INPUT_SIZE);
     
-    // Crear canvas de IA si no existe
-    if (!window.aiCanvas) {
-        window.aiCanvas = document.createElement('canvas');
-        window.aiCanvas.width = targetSize;
-        window.aiCanvas.height = targetSize;
-        window.aiCtx = window.aiCanvas.getContext('2d', { willReadFrequently: true });
-    }
+    // 2. Extraer los píxeles RGBA del canvas redimensionado
+    const imageData = resizeCtx.getImageData(0, 0, INPUT_SIZE, INPUT_SIZE);
+    const data = imageData.data; // Array plano [R,G,B,A, R,G,B,A, ...]
     
-    // Redimensionar a 640x640
-    window.aiCtx.drawImage(sourceCanvas, 0, 0, targetSize, targetSize);
-    
-    const imageData = window.aiCtx.getImageData(0, 0, targetSize, targetSize);
-    const data = imageData.data;
-    
-    // Crear tensor CHW
-    const imageSize = targetSize * targetSize;
+    // 3. Crear el buffer para el tensor CHW float32 [1, 3, 640, 640]
+    const imageSize = INPUT_SIZE * INPUT_SIZE;
     const float32Array = new Float32Array(3 * imageSize);
     
+    // 4. Llenar las capas R, G, B en orden CHW, ignorando el canal Alfa
     for (let i = 0; i < imageSize; i++) {
-        float32Array[i] = data[i * 4] / 255.0;
-        float32Array[imageSize + i] = data[i * 4 + 1] / 255.0;
-        float32Array[2 * imageSize + i] = data[i * 4 + 2] / 255.0;
+        // data[i*4] = Rojo, data[i*4+1] = Verde, data[i*4+2] = Azul, data[i*4+3] = Alfa
+        float32Array[i]                    = data[i * 4] / 255.0;     // Rojo
+        float32Array[imageSize + i]        = data[i * 4 + 1] / 255.0; // Verde
+        float32Array[2 * imageSize + i]    = data[i * 4 + 2] / 255.0; // Azul
     }
     
-    return new ort.Tensor('float32', float32Array, [1, 3, targetSize, targetSize]);
+    // 5. Devolver el tensor ONNX con la forma [1, 3, 640, 640]
+    return new ort.Tensor('float32', float32Array, [1, 3, INPUT_SIZE, INPUT_SIZE]);
 }
-
+// ==================== PROCESAMIENTO DE SALIDA ====================
+// Solo se busca la clase objetivo (persona) y se ignoran las demás para reducir falsos positivos
+// Procesa la salida del modelo y devuelve un array de detecciones con coordenadas absolutas
 function processOutput(outputMap, ow, oh) {
     let output = null;
-    for (const key of Object.keys(outputMap)) {
-        output = outputMap[key];
-        break;
-    }
+    for (const key of Object.keys(outputMap)) { output = outputMap[key]; break; }
     if (!output) return [];
     
     const data = output.data;
@@ -868,38 +866,35 @@ function processOutput(outputMap, ow, oh) {
     const numAnchors = dims[2];
     const detections = [];
     
-    // Solo buscar clase 0 (persona)
-    const classIdx = CLASS_TARGET;
-    
     for (let c = 0; c < numAnchors; c++) {
+        // SOLO buscar la clase 0 (persona)
+        const classIdx = 0;
         const conf = data[(4 + classIdx) * numAnchors + c];
         
         if (conf > CONF_THRESHOLD) {
             let cx = data[0 * numAnchors + c];
             let cy = data[1 * numAnchors + c];
-            let w = data[2 * numAnchors + c];
-            let h = data[3 * numAnchors + c];
+            let w  = data[2 * numAnchors + c];
+            let h  = data[3 * numAnchors + c];
             
             // Convertir coordenadas
             if (cx > 1.0 || cy > 1.0 || w > 1.0 || h > 1.0) {
                 cx = (cx / INPUT_SIZE) * ow;
                 cy = (cy / INPUT_SIZE) * oh;
-                w = (w / INPUT_SIZE) * ow;
-                h = (h / INPUT_SIZE) * oh;
+                w  = (w  / INPUT_SIZE) * ow;
+                h  = (h  / INPUT_SIZE) * oh;
             } else {
                 cx = cx * ow;
                 cy = cy * oh;
-                w = w * ow;
-                h = h * oh;
+                w  = w  * ow;
+                h  = h  * oh;
             }
             
             const x1 = cx - w / 2;
             const y1 = cy - h / 2;
             
             detections.push({
-                x1, y1,
-                x2: cx + w / 2,
-                y2: cy + h / 2,
+                x1, y1, x2: cx + w/2, y2: cy + h/2,
                 cx, cy, w, h,
                 confidence: conf,
                 class: classIdx
@@ -918,18 +913,13 @@ function applyNMS(dets) {
         let suppress = false;
         for (let j = 0; j < keep.length; j++) {
             if (dets[i].class !== keep[j].class) continue;
-            
             const xA = Math.max(dets[i].x1, keep[j].x1);
             const yA = Math.max(dets[i].y1, keep[j].y1);
             const xB = Math.min(dets[i].x2, keep[j].x2);
             const yB = Math.min(dets[i].y2, keep[j].y2);
             const inter = Math.max(0, xB - xA) * Math.max(0, yB - yA);
             const iou = inter / (dets[i].w * dets[i].h + keep[j].w * keep[j].h - inter);
-            
-            if (iou > IOU_THRESHOLD) {
-                suppress = true;
-                break;
-            }
+            if (iou > IOU_THRESHOLD) { suppress = true; break; }
         }
         if (!suppress) keep.push(dets[i]);
     }
@@ -940,10 +930,23 @@ function selectTarget(dets) {
     const targets = dets.filter(d => d.class === CLASS_TARGET);
     if (!targets.length) return null;
     targets.sort((a, b) => (b.w * b.h) - (a.w * a.h));
+    console.log(`🎯 Buscando clase objetivo: ${CLASS_TARGET}`);
+    console.log(`   Candidatos: ${targets.length}`);
+    if (!targets.length) return null;
+    targets.sort((a, b) => (b.w * b.h) - (a.w * a.h));
+    console.log(`   Mejor: clase=${targets[0].class} conf=${(targets[0].confidence*100).toFixed(1)}%`);
     return targets[0];
 }
 
 function drawDetections(dets) {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    // Volvemos a pintar la imagen al derecho antes de poner los cuadros encima
+    ctx.save();
+    ctx.translate(0, canvas.height);
+    ctx.scale(1, -1);
+    ctx.drawImage(imgStream, 0, 0, canvas.width, canvas.height);
+    ctx.restore();
+    
     for (const d of dets) {
         const isTarget = d.class === CLASS_TARGET;
         ctx.strokeStyle = isTarget ? '#00ff00' : '#4488ff';
@@ -951,7 +954,6 @@ function drawDetections(dets) {
         ctx.strokeRect(d.x1, d.y1, d.w, d.h);
         
         if (isTarget) {
-            // Dibujar punto central
             ctx.strokeStyle = '#ff0000';
             ctx.lineWidth = 2;
             ctx.beginPath();
@@ -961,29 +963,28 @@ function drawDetections(dets) {
             ctx.lineTo(d.cx, d.cy + 15);
             ctx.stroke();
             
-            // Mostrar confianza
             ctx.fillStyle = '#00ff00';
             ctx.font = 'bold 14px monospace';
-            ctx.fillText(`${(d.confidence * 100).toFixed(0)}%`, d.x1, d.y1 - 6);
+            ctx.fillText(`${(d.confidence*100).toFixed(0)}%`, d.x1, d.y1 - 6);
         }
     }
 }
 
-
-
 function sendDrivingCommand(target, fw, fh) {
-    // Cálculo del ángulo
+    // ==================== 1. CÁLCULO DEL ÁNGULO POR VISIÓN ====================
     const errorX = target.cx - fw / 2;
     let angleDeg = 90 - (errorX / (fw / 2)) * 45;
     angleDeg = Math.max(0, Math.min(180, angleDeg));
-    
-    // Cálculo de velocidad por tamaño
+
+    // ==================== 2. CÁLCULO DE VELOCIDAD POR TAMAÑO ====================
     const areaRatio = (target.w * target.h) / (fw * fh);
+
+    const MIN_SPEED = 0;
+    const MAX_SPEED = 255;
     const AREA_FRENO = 0.6;
     const AREA_LENTO = 0.3;
     const AREA_MEDIO = 0.1;
-    const MAX_SPEED = 255;
-    
+
     let speed;
     if (areaRatio >= AREA_FRENO) {
         speed = 0;
@@ -995,32 +996,51 @@ function sendDrivingCommand(target, fw, fh) {
         speed = Math.round(180 + ((AREA_MEDIO - areaRatio) / AREA_MEDIO) * 75);
         speed = Math.min(MAX_SPEED, speed);
     }
-    speed = Math.max(0, Math.min(MAX_SPEED, speed));
-    
-    // ESCUDO DE SEGURIDAD CON ToF
+    speed = Math.max(MIN_SPEED, Math.min(MAX_SPEED, speed));
+
+    // 3a. Frenado de emergencia frontal
     if (tofFrontal < DISTANCIA_SEGURA) {
-        speed = 0;  
+        speed = 0;
         console.warn(`🛑 FRENO ToF: obstáculo frontal a ${tofFrontal}cm`);
     } else if (tofFrontal < DISTANCIA_PRECAUCION) {
+        // Reducir velocidad proporcionalmente
         const factor = (tofFrontal - DISTANCIA_SEGURA) / (DISTANCIA_PRECAUCION - DISTANCIA_SEGURA);
         speed = Math.round(speed * factor);
+        console.warn(`⚠️ PRECAUCIÓN ToF: reduciendo velocidad a ${speed} (frontal=${tofFrontal}cm)`);
     }
-    
-    // Bloquear giros peligrosos
+
+    // 3b. Bloquear giro si hay obstáculo lateral
     if (angleDeg < 75 && tofDerecho < DISTANCIA_SEGURA) {
+        // Intentando girar a la derecha pero hay obstáculo → ir recto
         angleDeg = 90;
         speed = 0;
+        console.warn(`🚫 GIRO DERECHA BLOQUEADO: obstáculo a ${tofDerecho}cm`);
     } else if (angleDeg > 105 && tofIzquierdo < DISTANCIA_SEGURA) {
+        // Intentando girar a la izquierda pero hay obstáculo → ir recto
         angleDeg = 90;
         speed = 0;
+        console.warn(`🚫 GIRO IZQUIERDA BLOQUEADO: obstáculo a ${tofIzquierdo}cm`);
     }
-    
+
+    // 3c. Ajuste fino: si el sensor lateral está en precaución, limitar el ángulo
+    if (angleDeg > 90 && tofIzquierdo < DISTANCIA_PRECAUCION) {
+        // Girando a la izquierda con obstáculo → limitar giro
+        angleDeg = Math.min(angleDeg, 120); // Máximo 120° (giro suave)
+        console.warn(`⚠️ GIRO IZQUIERDA LIMITADO: obstáculo a ${tofIzquierdo}cm`);
+    }
+    if (angleDeg < 90 && tofDerecho < DISTANCIA_PRECAUCION) {
+        // Girando a la derecha con obstáculo → limitar giro
+        angleDeg = Math.max(angleDeg, 60); // Máximo 60° (giro suave)
+        console.warn(`⚠️ GIRO DERECHA LIMITADO: obstáculo a ${tofDerecho}cm`);
+    }
+
+    // ==================== 4. ENVIAR COMANDO ====================
     const xCent = Math.round((target.cx / fw) * 255);
     const yCent = Math.round((target.cy / fh) * 255);
     
+    console.log(`🚗 Comando: area=${areaRatio.toFixed(3)} speed=${speed} angle=${angleDeg.toFixed(1)}° | ToF F:${tofFrontal} L:${tofIzquierdo} R:${tofDerecho}cm`);
+    
     sendPacket(CMD_DRIVE, xCent, yCent, angleDeg, speed, false);
-    lastDriveCommandTime = performance.now();
-    console.log(`🚗 DRIVE: speed=${speed} angle=${angleDeg.toFixed(1)}° centro=(${xCent},${yCent})`);
 }
 
 // ==================== INICIO ====================
@@ -1032,14 +1052,8 @@ window.addEventListener('load', () => {
 window.addEventListener('beforeunload', () => {
     stop();
     clearInterval(manualInterval);
-    if (animationFrameId) {
-        cancelAnimationFrame(animationFrameId);
-        animationFrameId = null;
-    }
-    if (voiceRecognition) {
-        try { voiceRecognition.stop(); } catch(e) {}
-    }
+    if (animationFrameId) cancelAnimationFrame(animationFrameId);
 });
 </script>
 </body>
-</html>
+</html> 

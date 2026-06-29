@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YOLO Robot Control Center</title>
+    <!-- Cargamos ONNX Runtime Web para ejecutar yolo11n.onnx en el celular -->
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
+    <style>
+        body { font-family: sans-serif; text-align: center; background: #121212; color: white; margin: 0; padding: 10px; }
+        video, canvas { display: block; margin: 10px auto; max-width: 100%; border-radius: 8px; background: #222; }
+        button { padding: 12px 24px; font-size: 16px; font-weight: bold; background: #00adb5; color: white; border: none; border-radius: 5px; cursor: pointer; margin: 5px; }
+        button:active { background: #007a80; }
+        .status { color: #00ff00; font-family: monospace; font-size: 14px; margin: 10px; }
+    </style>
+</head>
+<body>
+
+    <h1>YOLO Robot Control</h1>
+    <button id="btnConnect">Conectar Robot (BLE)</button>
+    <button id="btnStop" style="background:#ff4444;">EMERGENCIA (STOP)</button>
+    
+    <div class="status" id="lblStatus">Estado: Desconectado</div>
+    
+    <video id="webcam" autoplay playsinline muted width="640" height="480" style="display:none;"></video>
+    <canvas id="canvas" width="640" height="480"></canvas>
+
+<script>
+// --- CONSTANTES DEL FIRMWARE DEL ESP32-S3 ---
+const SERVICE_UUID        = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
+const CHARACTERISTIC_UUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
+
+const CMD_STOP      = 0x00;
+const CMD_DRIVE     = 0x01;
+const CMD_HEARTBEAT = 0x02;
+const CMD_SET_MODE  = 0x05;
+
+// --- VARIABLES GLOBALES ---
+let bleCharacteristic = null;
+let session = null;
+const video = document.getElementById('webcam');
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+
+// --- 1. INICIALIZAR YOLO EN EL NAVEGADOR ---
+async function initYOLO() {
+    document.getElementById('lblStatus').innerText = "Cargando modelo YOLO ONNX...";
+    try {
+        // Carga tu archivo exportado desde Python colocado en la misma carpeta
+        session = await ort.InferenceSession.create('./yolo11n.onnx', { executionProviders: ['webgl'] });
+        document.getElementById('lblStatus').innerText = "Modelo Listo. Buscando cámara...";
+        startCamera();
+    } catch (e) {
+        document.getElementById('lblStatus').innerText = "Error al cargar YOLO: " + e.message;
+    }
+}
+
+function startCamera() {
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment", width: 640, height: 480 }, audio: false })
+        .then(stream => {
+            video.srcObject = stream;
+            video.addEventListener('loadeddata', () => {
+                requestAnimationFrame(processFrame);
+            });
+        }).catch(err => alert("Error de cámara: " + err));
+}
+
+// --- 2. PROCESAMIENTO VISUAL E INFERENCIA ---
+async function processFrame() {
+    if (video.readyState === video.HAVE_ENOUGH_DATA) {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        
+        // Simulación de procesamiento de Tensores e Inferencia (Ajustar preprocesado según modelo)
+        // Tras pasar el cuadro por 'session.run()', YOLO nos dará las cajas y clases:
+        // Aquí simulamos que detectó un objetivo (por ejemplo, una botella o una persona)
+        
+        let targetDetected = true; 
+        let xBox = 380; // Coordenada X del centro de la caja detectada (0 a 640)
+        let yBox = 240; // Coordenada Y del centro de la caja detectada (0 a 480)
+
+        if (targetDetected) {
+            // Dibujar la cruz del objetivo en pantalla para monitoreo del usuario
+            ctx.strokeStyle = "#00ff00"; ctx.lineWidth = 3;
+            ctx.beginPath(); ctx.arc(xBox, yBox, 15, 0, 2*Math.PI); ctx.stroke();
+
+            // --- LÓGICA DE CONTROL CINEMÁTICO EN EL CELULAR ---
+            let centroPantallaX = canvas.width / 2; // 320
+            let errorX = xBox - centroPantallaX;   // Desvío respecto al centro
+            
+            // Mapeo simple: Si está centrado el ángulo es 90° (recto). Máximo desvío = 0° o 180°
+            let angleDeg = 90 + (errorX / centroPantallaX) * 45; 
+            let speed = 120; // Velocidad crucero adaptativa de persecución
+            
+            // Escalamos las coordenadas de pantalla (0-640, 0-480) al rango de 1 byte (0-255) requerido por el bus SPI
+            let xCent = Math.round((xBox / canvas.width) * 255);
+            let yCent = Math.round((yBox / canvas.height) * 255);
+
+            // Transmitir comando de tracción guiado por visión artificial al esclavo
+            sendPacket(CMD_DRIVE, xCent, yCent, angleDeg, speed, false);
+        }
+    }
+    requestAnimationFrame(processFrame);
+}
+
+// --- 3. CONEXIÓN WEB BLUETOOTH API ---
+document.getElementById('btnConnect').addEventListener('click', async () => {
+    try {
+        const device = await navigator.bluetooth.requestDevice({
+            filters: [{ namePrefix: "ESP32" }], // Filtra por el nombre asignado en tu firmware
+            optionalServices: [SERVICE_UUID]
+        });
+        const server = await device.gatt.connect();
+        const service = await server.getPrimaryService(SERVICE_UUID);
+        bleCharacteristic = await service.getCharacteristic(CHARACTERISTIC_UUID);
+        document.getElementById('lblStatus').innerText = "¡Robot Conectado por BLE!";
+    } catch (e) {
+        document.getElementById('lblStatus').innerText = "Fallo de conexión: " + e.message;
+    }
+});
+
+// Botón de parada drástica e inmediata de hardware
+document.getElementById('btnStop').addEventListener('click', () => {
+    sendPacket(CMD_STOP, 0, 0, 90, 0, false);
+});
+
+// --- 4. CONSTRUCCIÓN Y ENVÍO DEL PAQUETE BINARIO DE 12 BYTES ---
+function buildPacket(cmdId, xCent, yCent, angleDeg, speed, reverse = false) {
+    const buf = new ArrayBuffer(12);
+    const view = new DataView(buf);
+    let offset = 0;
+    
+    view.setUint8(offset++, 0xAA); // Header 1
+    view.setUint8(offset++, 0x55); // Header 2
+    view.setUint8(offset++, cmdId); // Comando
+    
+    view.setUint16(offset, xCent, true); offset += 2; // Guardado nativo uint16 (Little Endian)
+    view.setUint16(offset, yCent, true); offset += 2;
+    
+    const angleTenths = Math.round(angleDeg * 10); // Multiplicamos por 10 para transferir flotante en int16
+    view.setInt16(offset, angleTenths, true); offset += 2;
+    
+    view.setUint8(offset++, Math.min(255, speed));
+    
+    let flags = 0;
+    if (reverse) flags |= 0x01;
+    view.setUint8(offset++, flags);
+    
+    // Calcular Checksum polinómico de seguridad CRC8
+    const payload = new Uint8Array(buf, 2, 9);
+    const crc = crc8(payload);
+    view.setUint8(offset, crc);
+    
+    return new Uint8Array(buf);
+}
+
+function crc8(data) {
+    let crc = 0xFF;
+    for (let i = 0; i < data.length; i++) {
+        crc ^= data[i];
+        for (let j = 0; j < 8; j++) {
+            crc = (crc & 0x80) ? ((crc << 1) ^ 0x07) : (crc << 1);
+        }
+    }
+    return crc & 0xFF;
+}
+
+async function sendPacket(cmdId, xCent, yCent, angleDeg, speed, reverse) {
+    if (!bleCharacteristic) return;
+    const packet = buildPacket(cmdId, xCent, yCent, angleDeg, speed, reverse);
+    try {
+        // Ejecución asíncrona de alta velocidad sin esperar confirmación (baja latencia)
+        await bleCharacteristic.writeValueWithoutResponse(packet);
+    } catch (e) {
+        console.log("Error al transmitir por RF: " + e.message);
+    }
+}
+
+// Iniciar carga del ecosistema
+window.onload = initYOLO;
+</script>
+</body>
+</html>
